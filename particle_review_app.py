@@ -23,7 +23,7 @@ from datetime import datetime
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
-MODEL_PATH = r"C:\Users\artorres\runs\segment\active_learning\weights\best.pt"
+MODEL_PATH = "models/best.pt"
 CALIBRATION_UM_PER_PIXEL = 1.299
 
 SIZE_BINS = [
