@@ -50,7 +50,7 @@ CLASS_COLORS = {
 # STREAMLIT PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Particle Detection Review", layout="wide")
+st.set_page_config(page_title="Particle Detection Review", page_icon="icon.jpg", layout="wide")
 st.title("🧹 dirt_sniffer: Review Dashboard")
 
 
