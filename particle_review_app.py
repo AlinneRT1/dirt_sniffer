@@ -27,16 +27,15 @@ MODEL_PATH = "models/best.pt"
 CALIBRATION_UM_PER_PIXEL = 1.299
 
 SIZE_BINS = [
-    ("B", 5, 15),
-    ("C", 15, 25),
-    ("D", 25, 50),
-    ("E", 50, 100),
-    ("F", 100, 150),
-    ("G", 150, 200),
-    ("H", 200, 400),
-    ("I", 400, 600),
-    ("J", 600, 1000),
-    ("K", 1000, float("inf")),
+    ("B 5-15 (1519 pcs)", 5, 15),
+    ("C 12-25 (186 pcs)", 15, 25),
+    ("D 25-50 (67 pcs)", 25, 50),
+    ("E 50-100 (9 pcs)", 50, 100),
+    ("F 100-250 (1 pcs)", 100, 250),
+    ("G 250-500 (0 pcs)", 250, 500),
+    ("H 500-750 (0 pcs)", 500, 750),
+    ("I 750-100 (0 pcs)", 750, 1000),
+    ("J 1000+ (0 pcs)", 1000, float("inf")),
 ]
 
 CLASS_COLORS = {
@@ -52,7 +51,7 @@ CLASS_COLORS = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Particle Detection Review", layout="wide")
-st.title("🔬 Particle Detection Review Dashboard")
+st.title("🔬 Dirt Sniffer 🧹 Review Dashboard")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
