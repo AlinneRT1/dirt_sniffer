@@ -1,6 +1,10 @@
-streamlit
 opencv-python-headless
+streamlit
 numpy
 Pillow
 pandas
 ultralytics
+matplotlib
+plotly
+pyjwt
+requests
