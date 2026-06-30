@@ -2,8 +2,16 @@
 Particle Detection Gallery - Clean Version
 """
 import os
+
 os.environ['YOLO_AUTOINSTALL'] = 'false'
 os.environ['YOLO_CONFIG_DIR'] = '/tmp/yolo_config'
+
+# CRITICAL: Mock missing modules BEFORE importing YOLO
+import sys
+from unittest.mock import MagicMock
+
+# Mock pi_heif (not needed for JPG/PNG/TIFF)
+sys.modules['pi_heif'] = MagicMock()
 
 import streamlit as st
 import base64
@@ -15,12 +23,15 @@ from datetime import datetime
 from copy import deepcopy
 import plotly.graph_objects as go
 import warnings
+
 warnings.filterwarnings('ignore')
 
 try:
     from ultralytics import YOLO
+
     YOLO_OK = True
-except:
+except Exception as e:
+    st.error(f"YOLO import failed: {e}")
     YOLO_OK = False
 
 st.set_page_config(page_title="Particle Detection", page_icon="icon.png", layout="wide")
@@ -29,7 +40,9 @@ st.set_page_config(page_title="Particle Detection", page_icon="icon.png", layout
 try:
     with open("icon.png", "rb") as f:
         img = base64.b64encode(f.read()).decode()
-    st.markdown(f'<div style="display:flex;align-items:center;gap:15px;"><img src="data:image/png;base64,{img}" width="80"><h1 style="margin:0;">🧹 dirt_sniffer</h1></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:15px;"><img src="data:image/png;base64,{img}" width="80"><h1 style="margin:0;">🧹 dirt_sniffer</h1></div>',
+        unsafe_allow_html=True)
 except:
     st.markdown("# 🧹 dirt_sniffer")
 
@@ -45,11 +58,13 @@ SIZE_BINS = [
     ("E: 50-100μm", 50, 100),
 ]
 
+
 def get_size_bin(d):
     for label, lo, hi in SIZE_BINS:
         if lo <= d < hi:
             return label
     return "Other"
+
 
 @st.cache_resource
 def load_model():
@@ -60,6 +75,7 @@ def load_model():
     except Exception as e:
         st.error(f"Model load error: {e}")
         return None
+
 
 def process_image(path, model):
     try:
@@ -105,6 +121,7 @@ def process_image(path, model):
         import traceback
         st.error(traceback.format_exc())
         return None
+
 
 # SESSION STATE
 if "results" not in st.session_state:
@@ -164,7 +181,9 @@ else:
                     img_arr = np.array(img)
 
                     x, y, w, h = p["x"], p["y"], p["w"], p["h"]
-                    crop = img_arr[max(0,y-15):min(img_arr.shape[0],y+h+15), max(0,x-15):min(img_arr.shape[1],x+w+15)]
+                    crop = img_arr[
+                        max(0, y - 15):min(img_arr.shape[0], y + h + 15), max(0, x - 15):min(img_arr.shape[1],
+                                                                                             x + w + 15)]
 
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
                     st.caption(f"{p['class']}")
