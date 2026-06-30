@@ -391,45 +391,92 @@ with st.sidebar:
             if model is None:
                 st.error("❌ Model not found at " + MODEL_PATH)
             else:
-                progress = st.progress(0)
-                status = st.empty()
+                # Create progress UI
+                progress_container = st.container()
+                with progress_container:
+                    file_progress = st.progress(0)
+                    status_text = st.empty()
+                    details_text = st.empty()
+                    tile_progress = st.empty()
+
                 errors = []
+                total_files = len(uploaded_files)
+                total_particles = 0
 
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    for i, f in enumerate(uploaded_files):
-                        status.text(f"Processing {i + 1}/{len(uploaded_files)}: {f.name}")
-
+                    for file_idx, f in enumerate(uploaded_files):
                         try:
                             temp_path = os.path.join(tmpdir, f.name)
                             with open(temp_path, "wb") as fp:
                                 fp.write(f.getbuffer())
 
-                            # Check image size to warn about tiling
+                            # Check image size
                             img_check = Image.open(temp_path)
                             img_h, img_w = img_check.size[1], img_check.size[0]
 
-                            if img_h > custom_tile_size or img_w > custom_tile_size:
-                                num_tiles = int(np.ceil(img_w / custom_tile_size) * np.ceil(img_h / custom_tile_size))
-                                status.text(
-                                    f"🟡 Tiling {f.name} ({img_w}x{img_h}) into {num_tiles} tiles @ {custom_tile_size}px...")
+                            # Update status
+                            file_pct = int((file_idx / total_files) * 100)
+                            status_text.markdown(f"**📄 File {file_idx + 1}/{total_files}: {f.name}**")
+                            details_text.markdown(f"*Image size: {img_w}×{img_h}*")
 
+                            # Check if tiling needed
+                            if img_h > custom_tile_size or img_w > custom_tile_size:
+                                stride = custom_tile_size * (1 - TILE_OVERLAP_PCT)
+                                num_tiles_h = int(np.ceil(img_h / stride))
+                                num_tiles_w = int(np.ceil(img_w / stride))
+                                num_tiles = num_tiles_h * num_tiles_w
+
+                                if num_tiles <= 400:
+                                    time_est = "30-45 min"
+                                elif num_tiles <= 600:
+                                    time_est = "45-60 min"
+                                else:
+                                    time_est = "1-2 hours"
+
+                                tile_progress.markdown(
+                                    f"🟡 **Tiling enabled:** {num_tiles} tiles ({num_tiles_w}×{num_tiles_h}) @ {custom_tile_size}px\n\n"
+                                    f"⏱️ **Est. time:** {time_est}"
+                                )
+                            else:
+                                tile_progress.markdown(
+                                    f"✅ **No tiling needed** (image smaller than {custom_tile_size}px)")
+
+                            # Run inference
+                            status_text.markdown(f"**⏳ Processing {f.name}...**")
                             particles = process_image(temp_path, model, custom_tile_size)
+
                             if particles:
                                 st.session_state.results[f.name] = particles
                                 st.session_state.uploaded_files_cache[f.name] = f
-                                status.text(f"✅ {f.name}: {len(particles)} particles")
+                                total_particles += len(particles)
+                                status_text.markdown(f"✅ **{f.name}:** {len(particles)} particles detected")
+                                tile_progress.empty()
                             else:
                                 errors.append(f"No particles detected in {f.name}")
+                                status_text.markdown(f"⚠️ **{f.name}:** No particles found")
 
                         except Exception as e:
                             errors.append(f"Error with {f.name}: {str(e)}")
+                            status_text.markdown(f"❌ **{f.name}:** Error")
 
-                        progress.progress((i + 1) / len(uploaded_files))
+                        # Update file progress
+                        file_progress.progress((file_idx + 1) / total_files)
 
-                status.text("✅ Done!")
+                # Final summary
+                st.divider()
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("📁 Files", total_files)
+                with col2:
+                    st.metric("🔍 Total Particles", total_particles)
+                with col3:
+                    st.metric("⏱️ Status", "✅ Done!")
+
                 if errors:
+                    st.warning("**⚠️ Warnings:**")
                     for err in errors:
-                        st.warning(err)
+                        st.write(f"• {err}")
+
                 st.rerun()
 
     st.divider()
