@@ -21,6 +21,7 @@ from datetime import datetime
 from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
+import base64
 
 
 # ─────────────────────────────────────────────────────────────────────────────
