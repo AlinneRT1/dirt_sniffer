@@ -8,3 +8,4 @@ matplotlib
 plotly
 pyjwt
 requests
+ultralytics>=8.0.0
