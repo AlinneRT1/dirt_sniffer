@@ -81,12 +81,13 @@ def get_size_bin(diameter_um):
 
 
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
-    region = image_np[max(0, y-5):min(image_np.shape[0], y+h+5),
-                      max(0, x-5):min(image_np.shape[1], x+w+5)]
+    region = image_np[max(0, y - 5):min(image_np.shape[0], y + h + 5),
+    max(0, x - 5):min(image_np.shape[1], x + w + 5)]
     if region.size == 0:
         return False
     avg_brightness = np.mean(region)
     return avg_brightness < threshold
+
 
 def resize_image_for_display(image_array, max_height=1080):
     """Resize image to max height for faster display"""
@@ -97,30 +98,31 @@ def resize_image_for_display(image_array, max_height=1080):
         image_array = cv2.resize(image_array, (new_w, max_height))
     return image_array
 
+
 def process_image(image_path, model):
     """Run YOLO inference"""
     image = cv2.imread(image_path)
     if image is None:
         return None
-    
+
     h, w = image.shape[:2]
     results = model(image, iou=0.45, conf=0.02, verbose=False)
-    
+
     particles = []
     for r in results:
         if r.boxes is None or r.masks is None:
             continue
-        
+
         for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
             x1, y1, x2, y2 = [int(v) for v in box.tolist()]
             label = model.names[int(cls)]
-            
+
             box_w = x2 - x1
             box_h = y2 - y1
             max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
-            
+
             is_black = is_black_background(image, x1, y1, box_w, box_h)
-            
+
             particles.append({
                 "x": x1, "y": y1, "w": box_w, "h": box_h,
                 "class": label, "confidence": float(conf),
@@ -129,7 +131,7 @@ def process_image(image_path, model):
                 "deleted": False,
                 "black_bg": is_black
             })
-    
+
     return particles
 
 
@@ -157,13 +159,13 @@ def push_undo():
 
 with st.sidebar:
     st.header("📤 Upload & Process")
-    
+
     uploaded_files = st.file_uploader(
         "Upload images (JPG, PNG, TIFF)",
         type=["jpg", "jpeg", "png", "tif", "tiff"],
         accept_multiple_files=True
     )
-    
+
     if uploaded_files:
         if st.button("🔍 Run Inference"):
             model = load_model()
@@ -172,46 +174,47 @@ with st.sidebar:
             else:
                 progress = st.progress(0)
                 status = st.empty()
-                
+
                 with tempfile.TemporaryDirectory() as tmpdir:
                     for i, f in enumerate(uploaded_files):
-                        status.text(f"Processing {i+1}/{len(uploaded_files)}...")
-                        
+                        status.text(f"Processing {i + 1}/{len(uploaded_files)}...")
+
                         temp_path = os.path.join(tmpdir, f.name)
                         with open(temp_path, "wb") as fp:
                             fp.write(f.getbuffer())
-                        
+
                         particles = process_image(temp_path, model)
                         if particles:
                             st.session_state.results[f.name] = particles
                             st.session_state.uploaded_files_cache[f.name] = f
-                        
+
                         progress.progress((i + 1) / len(uploaded_files))
-                
+
                 status.text("✅ Done!")
                 st.rerun()
-    
+
     st.divider()
-    
+
     if st.session_state.undo_stack:
         if st.button("↶ Undo"):
             st.session_state.results = st.session_state.undo_stack.pop()
             st.session_state.selected_particles = set()
             st.rerun()
-    
+
     if st.session_state.results:
         total = sum(len([p for p in ps if not p["deleted"]]) for ps in st.session_state.results.values())
-        black_count = sum(len([p for p in ps if p["black_bg"] and not p["deleted"]]) for ps in st.session_state.results.values())
-        
+        black_count = sum(
+            len([p for p in ps if p["black_bg"] and not p["deleted"]]) for ps in st.session_state.results.values())
+
         st.success(f"✅ {len(st.session_state.results)} images")
         st.info(f"📊 {total} particles")
         if black_count > 0:
             st.warning(f"⚫ {black_count} black bg")
-        
+
         st.write(f"**Selected:** {len(st.session_state.selected_particles)}")
-    
+
     st.divider()
-    
+
     if st.button("📥 Export CSV"):
         rows = []
         for img_name, ps in st.session_state.results.items():
@@ -225,7 +228,7 @@ with st.sidebar:
                         "confidence": round(p["confidence"], 3),
                         "black_background": p["black_bg"],
                     })
-        
+
         if rows:
             df = pd.DataFrame(rows)
             csv = df.to_csv(index=False)
@@ -246,17 +249,17 @@ else:
     # ─────────────────────────────────────────────────────────────────────────
     # PART 1: SUMMARY TABLE
     # ─────────────────────────────────────────────────────────────────────────
-    
+
     st.subheader("📊 Summary Table")
-    
+
     data = {}
     for cls in ["Fiber", "Glass", "Metallic", "Other"]:
         data[cls] = {}
         for b, _, _ in SIZE_BINS:
-            count = sum(len([p for p in ps if p["class"] == cls and p["size_bin"] == b and not p["deleted"]]) 
-                       for ps in st.session_state.results.values())
+            count = sum(len([p for p in ps if p["class"] == cls and p["size_bin"] == b and not p["deleted"]])
+                        for ps in st.session_state.results.values())
             data[cls][b] = count
-    
+
     rows = []
     for cls in ["Fiber", "Glass", "Metallic", "Other"]:
         row = {"Material": cls}
@@ -267,56 +270,56 @@ else:
             total += c
         row["Total"] = total
         rows.append(row)
-    
+
     st.dataframe(pd.DataFrame(rows), use_container_width=True, height=150)
-    
+
     st.divider()
-    
+
     # ─────────────────────────────────────────────────────────────────────────
     # PART 2: FILTERS & ALL PARTICLE GALLERY
     # ─────────────────────────────────────────────────────────────────────────
-    
+
     st.subheader("🖼️ All Particles Gallery")
-    
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        filter_class = st.multiselect("Filter by class:", ["Fiber", "Glass", "Metallic", "Other"], 
-                                     default=["Fiber", "Glass", "Metallic", "Other"], key="fc")
+        filter_class = st.multiselect("Filter by class:", ["Fiber", "Glass", "Metallic", "Other"],
+                                      default=["Fiber", "Glass", "Metallic", "Other"], key="fc")
     with col2:
-        filter_bin = st.multiselect("Filter by size bin:", [b[0] for b in SIZE_BINS], 
-                                   default=[b[0] for b in SIZE_BINS], key="fb")
+        filter_bin = st.multiselect("Filter by size bin:", [b[0] for b in SIZE_BINS],
+                                    default=[b[0] for b in SIZE_BINS], key="fb")
     with col3:
         show_black_only = st.checkbox("Black bg only")
     with col4:
         items_per_page = st.selectbox("Per page:", [12, 20, 36, 50], index=0)
-    
+
     # Collect all particles
     all_particles = []
     for img_name, ps in st.session_state.results.items():
         for idx, p in enumerate(ps):
             if not p["deleted"]:
                 key = f"{img_name}_{idx}"
-                if (p["class"] in filter_class and 
-                    p["size_bin"] in filter_bin and
-                    (not show_black_only or p["black_bg"])):
+                if (p["class"] in filter_class and
+                        p["size_bin"] in filter_bin and
+                        (not show_black_only or p["black_bg"])):
                     all_particles.append({
                         "key": key,
                         "img": img_name,
                         "idx": idx,
                         "particle": p
                     })
-    
+
     if all_particles:
         st.success(f"{len(all_particles)} particles found")
-        
+
         # Pagination
         total_pages = max(1, (len(all_particles) + items_per_page - 1) // items_per_page)
         page = st.slider("Page:", 1, total_pages, 1) - 1
-        
+
         start_idx = page * items_per_page
         end_idx = start_idx + items_per_page
         page_particles = all_particles[start_idx:end_idx]
-        
+
         # Gallery grid (6 columns for performance)
         cols = st.columns(6)
         for i, match in enumerate(page_particles):
@@ -325,12 +328,12 @@ else:
                 pidx = match["idx"]
                 p = match["particle"]
                 key = match["key"]
-                
+
                 f = st.session_state.uploaded_files_cache.get(img_name)
                 if f:
                     img = Image.open(f)
                     img_np = np.array(img)
-                    
+
                     # Crop with tight margin
                     x, y, w, h = p["x"], p["y"], p["w"], p["h"]
                     margin = 15
@@ -339,20 +342,20 @@ else:
                     x2 = min(img_np.shape[1], x + w + margin)
                     y2 = min(img_np.shape[0], y + h + margin)
                     crop = img_np[y1:y2, x1:x2]
-                    
+
                     # Display crop
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
-                    
+
                     # Info
                     st.caption(f"{p['class']} | {p['size_bin']}")
-                    
+
                     # Inline select checkbox
                     is_selected = key in st.session_state.selected_particles
                     if st.checkbox("Select", value=is_selected, key=f"sel_{key}"):
                         st.session_state.selected_particles.add(key)
                     else:
                         st.session_state.selected_particles.discard(key)
-                    
+
                     # Change class
                     new_cls = st.selectbox(
                         "Class:",
@@ -365,20 +368,20 @@ else:
                         st.session_state.results[img_name][pidx]["class"] = new_cls
                         st.session_state.results[img_name][pidx]["size_bin"] = get_size_bin(p["diameter_um"])
                         st.rerun()
-                    
+
                     # Delete
                     if st.button("🗑️ Delete", key=f"del_{key}"):
                         push_undo()
                         st.session_state.results[img_name][pidx]["deleted"] = True
                         st.rerun()
-                    
+
                     if p["black_bg"]:
                         st.warning("⚫ Black BG", icon="⚫")
-                    
+
                     # View full image with zoom/pan (on demand)
                     if st.button("🔍 View Full", key=f"view_{key}"):
                         st.session_state[f"show_full_{key}"] = True
-        
+
         # Full image viewer (only renders if clicked)
         for match in page_particles:
             key = match["key"]
@@ -386,25 +389,25 @@ else:
                 img_name = match["img"]
                 pidx = match["idx"]
                 p = match["particle"]
-                
+
                 with st.expander(f"Full Image: {img_name}", expanded=True):
                     f = st.session_state.uploaded_files_cache.get(img_name)
                     if f:
                         img = Image.open(f)
                         img_np = np.array(img)
-                        
+
                         # Create Plotly figure with zoom/pan
                         fig = go.Figure()
                         fig.add_trace(go.Image(z=img_np, name="Image"))
-                        
+
                         # Highlight particle
                         x, y, w, h = p["x"], p["y"], p["w"], p["h"]
                         fig.add_shape(
                             type="rect",
-                            x0=x, y0=y, x1=x+w, y1=y+h,
+                            x0=x, y0=y, x1=x + w, y1=y + h,
                             line=dict(color="lime", width=3)
                         )
-                        
+
                         fig.update_layout(
                             title=f"{img_name} | {p['class']} ({p['diameter_um']}µm)",
                             showlegend=False,
@@ -414,9 +417,9 @@ else:
                         )
                         fig.update_xaxes(scaleanchor="y", scaleratio=1)
                         fig.update_yaxes(scaleanchor="x", scaleratio=1)
-                        
+
                         st.plotly_chart(fig, use_container_width=True)
-                        
+
                         col1, col2, col3 = st.columns(3)
                         with col1:
                             st.write(f"**Class:** {p['class']}")
@@ -426,27 +429,27 @@ else:
                             if st.button("Close", key=f"close_{key}"):
                                 st.session_state[f"show_full_{key}"] = False
                                 st.rerun()
-        
+
         st.divider()
-        
+
         # ─────────────────────────────────────────────────────────────────────
         # PART 3: MASS EDIT
         # ─────────────────────────────────────────────────────────────────────
-        
+
         if st.session_state.selected_particles:
             st.subheader("⚙️ Bulk Edit Selected")
-            
+
             selected_count = len(st.session_state.selected_particles)
             st.info(f"**{selected_count} particle(s) selected**")
-            
+
             col1, col2 = st.columns(2)
             with col1:
                 action = st.radio("Action:", ["Delete All Selected", "Change Class To"], horizontal=True)
-            
+
             with col2:
                 if action == "Change Class To":
                     new_cls = st.selectbox("New class:", ["Fiber", "Glass", "Metallic", "Other"], key="mass_cls")
-            
+
             if st.button("🔥 Execute Action"):
                 push_undo()
                 for key in st.session_state.selected_particles:
