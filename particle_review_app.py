@@ -23,6 +23,9 @@ from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
 import base64
+import os
+os.environ['YOLO_AUTOINSTALL'] = '0'  # Disable auto-install
+os.environ['YOLO_CONFIG_DIR'] = '/tmp/yolo_config'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
