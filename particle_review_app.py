@@ -1,8 +1,4 @@
 import os
-
-os.environ['YOLO_AUTOINSTALL'] = 'false'
-os.environ['YOLO_CONFIG_DIR'] = '/tmp/yolo_config'
-
 import sys
 from unittest.mock import MagicMock
 
@@ -22,13 +18,21 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Particle Detection", layout="wide")
 st.title("🧹 dirt_sniffer: Particle Detection")
 
-try:
-    from ultralytics import YOLO
 
-    model = None
-except Exception as e:
-    st.error(f"YOLO error: {e}")
-    model = None
+@st.cache_resource
+def load_yolo():
+    try:
+        from ultralytics import YOLO
+        st.write("✓ Downloading model (first time only)...")
+        model = YOLO("yolov8n-seg.pt")
+        st.write("✓ Model ready!")
+        return model
+    except Exception as e:
+        st.error(f"YOLO load failed: {e}")
+        return None
+
+
+model = load_yolo()
 
 if "results" not in st.session_state:
     st.session_state.results = {}
