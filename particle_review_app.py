@@ -31,6 +31,7 @@ import tempfile
 from datetime import datetime
 from copy import deepcopy
 import plotly.graph_objects as go
+<<<<<<< HEAD
 import warnings
 
 # Suppress warnings
@@ -44,6 +45,12 @@ except Exception as e:
     print(f"⚠️ YOLO import warning (non-critical): {e}")
     YOLO = None
     YOLO_AVAILABLE = False
+=======
+import base64
+import os
+os.environ['YOLO_AUTOINSTALL'] = '0'  # Disable auto-install
+os.environ['YOLO_CONFIG_DIR'] = '/tmp/yolo_config'
+>>>>>>> c5c009804f801dd7fbe5a2d7473a2aba0396b519
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
