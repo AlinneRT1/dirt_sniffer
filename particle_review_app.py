@@ -48,7 +48,13 @@ CLASS_COLORS = {
 }
 
 st.set_page_config(page_title="Particle Detection Review", page_icon="icon.ico", layout="wide")
-st.markdown("# ![icon](icon.png) dirt_sniffer: Review Dashboard")
+st.set_page_config(page_title="Particle Detection Review", page_icon="icon.png", layout="wide")
+
+col1, col2 = st.columns([0.1, 0.9])
+with col1:
+    st.image("icon.png", width=60)
+with col2:
+    st.markdown("# dirt_sniffer: Review Dashboard")
 
 @st.cache_resource
 def load_model():
