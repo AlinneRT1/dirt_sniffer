@@ -49,7 +49,14 @@ except Exception as e:
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
-MODEL_PATH = "models/best.pt"
+# Model path - adjust if your model is elsewhere
+MODEL_PATH = "models/best.pt"  # Change this to your actual model path
+
+# Try these alternatives if model not found:
+# MODEL_PATH = "/mount/src/particlecounter/models/best.pt"
+# MODEL_PATH = "best.pt"
+# MODEL_PATH = "/path/to/your/yolov8n-seg.pt"  # Default YOLO model (will download)
+
 CALIBRATION_UM_PER_PIXEL = 1.299
 BLACK_BG_THRESHOLD = 30
 
@@ -93,19 +100,69 @@ except:
 
 @st.cache_resource
 def load_model():
-    """Load YOLO model once"""
+    """Load YOLO model once - with diagnostics"""
+    print(f"\n[load_model] Starting model load...")
+    print(f"[load_model] YOLO_AVAILABLE: {YOLO_AVAILABLE}")
+
     if not YOLO_AVAILABLE:
-        st.error("❌ YOLO not available. Check dependencies.")
+        error_msg = "❌ YOLO module not imported. Check if ultralytics is installed: pip install ultralytics"
+        print(f"[load_model] {error_msg}")
+        st.error(error_msg)
         return None
 
-    if not os.path.exists(MODEL_PATH):
-        st.error(f"❌ Model not found at {MODEL_PATH}")
-        return None
+    # Check if model file exists
+    if os.path.exists(MODEL_PATH):
+        print(f"[load_model] ✓ Model found at: {MODEL_PATH}")
+    else:
+        print(f"[load_model] ✗ Model NOT found at: {MODEL_PATH}")
+        print(f"[load_model] Checking alternative paths...")
+
+        # Try to find model in common locations
+        alternatives = [
+            os.path.abspath("models/best.pt"),
+            os.path.abspath("best.pt"),
+            "/mount/src/particlecounter/models/best.pt",
+            "/app/models/best.pt",
+        ]
+
+        found = False
+        for alt_path in alternatives:
+            if os.path.exists(alt_path):
+                print(f"[load_model] ✓ Found model at alternative path: {alt_path}")
+                MODEL_PATH_ACTUAL = alt_path
+                found = True
+                break
+
+        if not found:
+            error_msg = f"""
+            ❌ Model file not found!
+            
+            Expected at: {os.path.abspath(MODEL_PATH)}
+            
+            **Fix:**
+            1. Check if `models/best.pt` exists in your repo
+            2. Or update MODEL_PATH in the script to correct location
+            3. Or upload your model file to the repo
+            
+            **Alternative:** Use a pre-trained YOLO model (auto-downloads):
+            - Update MODEL_PATH = "yolov8n-seg.pt"  (nano, 2.7MB)
+            - Or MODEL_PATH = "yolov8s-seg.pt"  (small, 23MB)
+            """
+            print(f"[load_model] {error_msg}")
+            st.error(error_msg)
+            return None
+    else:
+        MODEL_PATH_ACTUAL = MODEL_PATH
 
     try:
-        return YOLO(MODEL_PATH)
+        print(f"[load_model] Loading YOLO from: {MODEL_PATH_ACTUAL}")
+        model = YOLO(MODEL_PATH_ACTUAL)
+        print(f"[load_model] ✓ Model loaded successfully!")
+        return model
     except Exception as e:
-        st.error(f"❌ Error loading model: {str(e)}")
+        error_msg = f"❌ Error loading model: {type(e).__name__}: {str(e)}"
+        print(f"[load_model] {error_msg}")
+        st.error(error_msg)
         return None
 
 # ─────────────────────────────────────────────────────────────────────────────
