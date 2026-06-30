@@ -306,8 +306,8 @@ else:
         st.success(f"{len(all_particles)} particles found")
         
         # Pagination
-        total_pages = (len(all_particles) + items_per_page - 1) // items_per_page
-        page = st.slider("Page:", 1, max(1, total_pages), 1) - 1
+        total_pages = max(1, (len(all_particles) + items_per_page - 1) // items_per_page)
+        page = st.slider("Page:", 1, total_pages, 1) - 1
         
         start_idx = page * items_per_page
         end_idx = start_idx + items_per_page
@@ -369,7 +369,59 @@ else:
                         st.rerun()
                     
                     if p["black_bg"]:
-                        st.warning("⚫ Black BG", icon="⚠️")
+                        st.warning("⚫ Black BG", icon="⚫")
+                    
+                    # View full image with zoom/pan (on demand)
+                    if st.button("🔍 View Full", key=f"view_{key}"):
+                        st.session_state[f"show_full_{key}"] = True
+        
+        # Full image viewer (only renders if clicked)
+        for match in page_particles:
+            key = match["key"]
+            if st.session_state.get(f"show_full_{key}", False):
+                img_name = match["img"]
+                pidx = match["idx"]
+                p = match["particle"]
+                
+                with st.expander(f"Full Image: {img_name}", expanded=True):
+                    f = st.session_state.uploaded_files_cache.get(img_name)
+                    if f:
+                        img = Image.open(f)
+                        img_np = np.array(img)
+                        
+                        # Create Plotly figure with zoom/pan
+                        fig = go.Figure()
+                        fig.add_trace(go.Image(z=img_np, name="Image"))
+                        
+                        # Highlight particle
+                        x, y, w, h = p["x"], p["y"], p["w"], p["h"]
+                        fig.add_shape(
+                            type="rect",
+                            x0=x, y0=y, x1=x+w, y1=y+h,
+                            line=dict(color="lime", width=3)
+                        )
+                        
+                        fig.update_layout(
+                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm)",
+                            showlegend=False,
+                            hovermode="closest",
+                            margin=dict(b=0, l=0, r=0, t=40),
+                            height=600,
+                        )
+                        fig.update_xaxes(scaleanchor="y", scaleratio=1)
+                        fig.update_yaxes(scaleanchor="x", scaleratio=1)
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**Class:** {p['class']}")
+                        with col2:
+                            st.write(f"**Size:** {p['diameter_um']}µm ({p['size_bin']})")
+                        with col3:
+                            if st.button("Close", key=f"close_{key}"):
+                                st.session_state[f"show_full_{key}"] = False
+                                st.rerun()
         
         st.divider()
         
