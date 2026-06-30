@@ -19,6 +19,8 @@ from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
 import plotly.express as px
+import base64
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
@@ -48,11 +50,15 @@ CLASS_COLORS = {
 }
 
 st.set_page_config(page_title="Particle Detection Review", page_icon="icon.ico", layout="wide")
-st.markdown("""
-    <div style="display: flex; align-items: center; gap: 15px;">
-        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" width="50">
-        <h1 style="margin: 0; padding: 0;">dirt_sniffer: Review Dashboard</h1>
-    </div>
+
+with open("icon.png", "rb") as f:
+    img = base64.b64encode(f.read()).decode()
+
+st.markdown(f"""
+<div style="display:flex;align-items:center;gap:15px;">
+    <img src="data:image/png;base64,{img}" width="50">
+    <h1 style="margin:0;">dirt_sniffer: Review Dashboard</h1>
+</div>
 """, unsafe_allow_html=True)
 
 st.divider()
