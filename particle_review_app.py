@@ -29,6 +29,7 @@ import base64
 MODEL_PATH = "models/best.pt"
 CALIBRATION_UM_PER_PIXEL = 1.299
 BLACK_BG_THRESHOLD = 30
+cv2.setImageMemLimits(maxImageSize=float('inf')) 
 
 SIZE_BINS = [
     ("B: 5-15μm (1519 pcs)", 5, 15),
