@@ -79,6 +79,7 @@ def get_size_bin(diameter_um):
             return label
     return "K"
 
+
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     region = image_np[max(0, y-5):min(image_np.shape[0], y+h+5),
                       max(0, x-5):min(image_np.shape[1], x+w+5)]
@@ -131,6 +132,7 @@ def process_image(image_path, model):
     
     return particles
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -144,8 +146,10 @@ if "selected_particles" not in st.session_state:
 if "uploaded_files_cache" not in st.session_state:
     st.session_state.uploaded_files_cache = {}
 
+
 def push_undo():
     st.session_state.undo_stack.append(deepcopy(st.session_state.results))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
