@@ -39,7 +39,6 @@ warnings.filterwarnings('ignore')
 # NOW import YOLO (after env vars are set)
 try:
     from ultralytics import YOLO
-
     YOLO_AVAILABLE = True
 except Exception as e:
     print(f"⚠️ YOLO import warning (non-critical): {e}")
@@ -92,7 +91,6 @@ try:
 except:
     st.markdown("# 🧹 dirt_sniffer: Review Dashboard")
 
-
 @st.cache_resource
 def load_model():
     """Load YOLO model once"""
@@ -109,7 +107,6 @@ def load_model():
     except Exception as e:
         st.error(f"❌ Error loading model: {str(e)}")
         return None
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TILING UTILITIES
@@ -143,7 +140,6 @@ def generate_tiles(image_h, image_w, tile_size=TILE_SIZE, overlap_pct=TILE_OVERL
 
     return tiles
 
-
 def iou(box1, box2):
     """Calculate IOU between two boxes [x1, y1, x2, y2]"""
     x1_min, y1_min, x1_max, y1_max = box1
@@ -163,7 +159,6 @@ def iou(box1, box2):
     union_area = box1_area + box2_area - inter_area
 
     return inter_area / union_area if union_area > 0 else 0.0
-
 
 def deduplicate_detections(particles, iou_threshold=IOU_DEDUP_THRESHOLD):
     """Remove duplicate detections from overlapping tiles"""
@@ -190,7 +185,6 @@ def deduplicate_detections(particles, iou_threshold=IOU_DEDUP_THRESHOLD):
 
     return kept
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
 # ─────────────────────────────────────────────────────────────────────────────
@@ -202,19 +196,17 @@ def get_size_bin(diameter_um):
             return label
     return "K"
 
-
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     """Check if background is black (safety check)"""
     try:
-        region = image_np[max(0, y - 5):min(image_np.shape[0], y + h + 5),
-        max(0, x - 5):min(image_np.shape[1], x + w + 5)]
+        region = image_np[max(0, y-5):min(image_np.shape[0], y+h+5),
+                          max(0, x-5):min(image_np.shape[1], x+w+5)]
         if region.size == 0:
             return False
         avg_brightness = np.mean(region)
         return avg_brightness < threshold
     except:
         return False
-
 
 def process_image(image_path, model, tile_size=TILE_SIZE):
     """
@@ -226,70 +218,94 @@ def process_image(image_path, model, tile_size=TILE_SIZE):
     ✅ Smart deduplication of overlapping detections
     """
     try:
+        print(f"\n{'='*60}")
+        print(f"[process_image] Starting: {image_path}")
+        print(f"[process_image] Tile size: {tile_size}px")
+
         # Step 1: Load with PIL (NO pixel limits)
+        print(f"[process_image] Loading image with PIL...")
         img_pil = Image.open(image_path)
+        print(f"[process_image] ✓ Loaded, mode={img_pil.mode}, size={img_pil.size}")
 
         # Step 2: Convert to RGB
+        print(f"[process_image] Converting to RGB...")
         if img_pil.mode != 'RGB':
             img_pil = img_pil.convert('RGB')
+        print(f"[process_image] ✓ Converted to RGB")
 
         # Step 3: Convert to numpy
+        print(f"[process_image] Converting to numpy array...")
         image = np.array(img_pil)
+        print(f"[process_image] ✓ Array shape: {image.shape}, dtype: {image.dtype}")
 
         if image is None or image.size == 0:
+            print(f"[process_image] ✗ Image is None or empty!")
             return None
 
         h, w = image.shape[:2]
+        print(f"[process_image] Image dimensions: {w}×{h}")
         particles = []
 
         # Step 4: Check if tiling needed
         if h > tile_size or w > tile_size:
+            print(f"[process_image] TILING: Image exceeds {tile_size}px")
             # TILING: Process in overlapping tiles
             tiles = generate_tiles(h, w, tile_size, TILE_OVERLAP_PCT)
             total_tiles = len(tiles)
+            print(f"[process_image] Generated {total_tiles} tiles")
 
             for tile_idx, (x1, y1, x2, y2) in enumerate(tiles):
-                tile = image[y1:y2, x1:x2]
+                try:
+                    if (tile_idx + 1) % max(1, total_tiles // 10) == 0 or tile_idx == 0:
+                        print(f"[process_image] Processing tile {tile_idx + 1}/{total_tiles}...")
 
-                # Run YOLO on tile
-                results = model(tile, iou=0.45, conf=0.02, verbose=False)
+                    tile = image[y1:y2, x1:x2]
 
-                # Extract particles and adjust coordinates to full image
-                for r in results:
-                    if r.boxes is None or r.masks is None:
-                        continue
+                    # Run YOLO on tile
+                    results = model(tile, iou=0.45, conf=0.02, verbose=False)
 
-                    for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
-                        try:
-                            bx1, by1, bx2, by2 = [int(v) for v in box.tolist()]
-
-                            # Adjust to full image coordinates
-                            x_full = bx1 + x1
-                            y_full = by1 + y1
-
-                            label = model.names[int(cls)]
-                            box_w = bx2 - bx1
-                            box_h = by2 - by1
-                            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
-
-                            is_black = is_black_background(image, x_full, y_full, box_w, box_h)
-
-                            particles.append({
-                                "x": x_full, "y": y_full, "w": box_w, "h": box_h,
-                                "class": label, "confidence": float(conf),
-                                "diameter_um": round(max_diam_um, 1),
-                                "size_bin": get_size_bin(max_diam_um),
-                                "deleted": False,
-                                "black_bg": is_black
-                            })
-                        except Exception as e:
-                            print(f"Error processing particle in tile {tile_idx}: {e}")
+                    # Extract particles and adjust coordinates to full image
+                    for r in results:
+                        if r.boxes is None or r.masks is None:
                             continue
 
+                        for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
+                            try:
+                                bx1, by1, bx2, by2 = [int(v) for v in box.tolist()]
+
+                                # Adjust to full image coordinates
+                                x_full = bx1 + x1
+                                y_full = by1 + y1
+
+                                label = model.names[int(cls)]
+                                box_w = bx2 - bx1
+                                box_h = by2 - by1
+                                max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+
+                                is_black = is_black_background(image, x_full, y_full, box_w, box_h)
+
+                                particles.append({
+                                    "x": x_full, "y": y_full, "w": box_w, "h": box_h,
+                                    "class": label, "confidence": float(conf),
+                                    "diameter_um": round(max_diam_um, 1),
+                                    "size_bin": get_size_bin(max_diam_um),
+                                    "deleted": False,
+                                    "black_bg": is_black
+                                })
+                            except Exception as e:
+                                print(f"[process_image] ⚠️ Particle extraction error in tile {tile_idx}: {e}")
+                                continue
+                except Exception as e:
+                    print(f"[process_image] ⚠️ Tile {tile_idx} processing error: {e}")
+                    continue
+
+            print(f"[process_image] ✓ Extracted {len(particles)} particles from {total_tiles} tiles")
             # Deduplicate overlapping detections
             particles = deduplicate_detections(particles, IOU_DEDUP_THRESHOLD)
+            print(f"[process_image] ✓ After dedup: {len(particles)} particles")
 
         else:
+            print(f"[process_image] NO TILING: Processing entire image directly")
             # NO TILING: Process entire image directly
             results = model(image, iou=0.45, conf=0.02, verbose=False)
 
@@ -317,15 +333,28 @@ def process_image(image_path, model, tile_size=TILE_SIZE):
                             "black_bg": is_black
                         })
                     except Exception as e:
-                        print(f"Error processing particle: {e}")
+                        print(f"[process_image] ⚠️ Particle extraction error: {e}")
                         continue
 
-        return particles if particles else None
+            print(f"[process_image] ✓ Extracted {len(particles)} particles")
+
+        result = particles if particles else None
+        print(f"[process_image] ✓ DONE: {len(particles)} particles found")
+        print(f"{'='*60}\n")
+        return result
 
     except Exception as e:
-        st.error(f"❌ Error processing {image_path}: {str(e)}")
+        print(f"\n{'='*60}")
+        print(f"[process_image] ✗✗✗ FATAL ERROR ✗✗✗")
+        print(f"[process_image] File: {image_path}")
+        print(f"[process_image] Error type: {type(e).__name__}")
+        print(f"[process_image] Error message: {str(e)}")
+        print(f"[process_image] Full traceback:")
+        import traceback
+        traceback.print_exc()
+        print(f"{'='*60}\n")
+        st.error(f"❌ Processing error: {type(e).__name__}: {str(e)}")
         return None
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SESSION STATE
@@ -340,11 +369,9 @@ if "selected_particles" not in st.session_state:
 if "uploaded_files_cache" not in st.session_state:
     st.session_state.uploaded_files_cache = {}
 
-
 def push_undo():
     """Save state for undo"""
     st.session_state.undo_stack.append(deepcopy(st.session_state.results))
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR - UPLOAD & CONTROLS
@@ -416,7 +443,7 @@ with st.sidebar:
 
                             # Update status
                             file_pct = int((file_idx / total_files) * 100)
-                            status_text.markdown(f"**📄 File {file_idx + 1}/{total_files}: {f.name}**")
+                            status_text.markdown(f"**📄 File {file_idx+1}/{total_files}: {f.name}**")
                             details_text.markdown(f"*Image size: {img_w}×{img_h}*")
 
                             # Check if tiling needed
@@ -438,8 +465,7 @@ with st.sidebar:
                                     f"⏱️ **Est. time:** {time_est}"
                                 )
                             else:
-                                tile_progress.markdown(
-                                    f"✅ **No tiling needed** (image smaller than {custom_tile_size}px)")
+                                tile_progress.markdown(f"✅ **No tiling needed** (image smaller than {custom_tile_size}px)")
 
                             # Run inference
                             status_text.markdown(f"**⏳ Processing {f.name}...**")
@@ -489,8 +515,7 @@ with st.sidebar:
 
     if st.session_state.results:
         total = sum(len([p for p in ps if not p["deleted"]]) for ps in st.session_state.results.values())
-        black_count = sum(
-            len([p for p in ps if p["black_bg"] and not p["deleted"]]) for ps in st.session_state.results.values())
+        black_count = sum(len([p for p in ps if p["black_bg"] and not p["deleted"]]) for ps in st.session_state.results.values())
 
         st.success(f"✅ {len(st.session_state.results)} images")
         st.info(f"📊 {total} particles")
@@ -543,7 +568,7 @@ else:
         data[cls] = {}
         for b, _, _ in SIZE_BINS:
             count = sum(len([p for p in ps if p["class"] == cls and p["size_bin"] == b and not p["deleted"]])
-                        for ps in st.session_state.results.values())
+                       for ps in st.session_state.results.values())
             data[cls][b] = count
 
     rows = []
@@ -570,10 +595,10 @@ else:
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         filter_class = st.multiselect("Filter by class:", ["Fiber", "Glass", "Metallic", "Other"],
-                                      default=["Fiber", "Glass", "Metallic", "Other"], key="fc")
+                                     default=["Fiber", "Glass", "Metallic", "Other"], key="fc")
     with col2:
         filter_bin = st.multiselect("Filter by size bin:", [b[0] for b in SIZE_BINS],
-                                    default=[b[0] for b in SIZE_BINS], key="fb")
+                                   default=[b[0] for b in SIZE_BINS], key="fb")
     with col3:
         show_black_only = st.checkbox("Black bg only")
     with col4:
@@ -586,8 +611,8 @@ else:
             if not p["deleted"]:
                 key = f"{img_name}_{idx}"
                 if (p["class"] in filter_class and
-                        p["size_bin"] in filter_bin and
-                        (not show_black_only or p["black_bg"])):
+                    p["size_bin"] in filter_bin and
+                    (not show_black_only or p["black_bg"])):
                     all_particles.append({
                         "key": key,
                         "img": img_name,
@@ -695,7 +720,7 @@ else:
                             x, y, w, h = p["x"], p["y"], p["w"], p["h"]
                             fig.add_shape(
                                 type="rect",
-                                x0=x, y0=y, x1=x + w, y1=y + h,
+                                x0=x, y0=y, x1=x+w, y1=y+h,
                                 line=dict(color="lime", width=3)
                             )
 
