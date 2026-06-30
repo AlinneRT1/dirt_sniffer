@@ -12,17 +12,38 @@ Usage:
     streamlit run particle_review_gallery_tiling.py
 """
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CRITICAL: Set environment variables BEFORE any imports
+# ─────────────────────────────────────────────────────────────────────────────
+import os
+import sys
+
+os.environ['YOLO_AUTOINSTALL'] = 'false'
+os.environ['YOLO_CONFIG_DIR'] = '/tmp/yolo_config'
+os.environ['PIP_NO_CACHE_DIR'] = '1'
+
 import streamlit as st
+import base64
 import numpy as np
 from PIL import Image
 import pandas as pd
-import os
 import tempfile
 from datetime import datetime
-from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
-import base64
+import warnings
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+# NOW import YOLO (after env vars are set)
+try:
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️ YOLO import warning (non-critical): {e}")
+    YOLO = None
+    YOLO_AVAILABLE = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
@@ -73,9 +94,19 @@ except:
 @st.cache_resource
 def load_model():
     """Load YOLO model once"""
-    if not os.path.exists(MODEL_PATH):
+    if not YOLO_AVAILABLE:
+        st.error("❌ YOLO not available. Check dependencies.")
         return None
-    return YOLO(MODEL_PATH)
+
+    if not os.path.exists(MODEL_PATH):
+        st.error(f"❌ Model not found at {MODEL_PATH}")
+        return None
+
+    try:
+        return YOLO(MODEL_PATH)
+    except Exception as e:
+        st.error(f"❌ Error loading model: {str(e)}")
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TILING UTILITIES
