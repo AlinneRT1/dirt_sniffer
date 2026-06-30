@@ -47,7 +47,7 @@ CLASS_COLORS = {
     "Other": (0, 0, 255),
 }
 
-st.set_page_config(page_title="Particle Detection Review", page_icon="icon.jpg", layout="wide")
+st.set_page_config(page_title="Particle Detection Review", page_icon="icon.ico", layout="wide")
 st.title("🧹 dirt_sniffer: Review Dashboard")
 
 @st.cache_resource
