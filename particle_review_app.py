@@ -31,7 +31,6 @@ import tempfile
 from datetime import datetime
 from copy import deepcopy
 import plotly.graph_objects as go
-<<<<<<< HEAD
 import warnings
 
 # Suppress warnings
@@ -40,17 +39,12 @@ warnings.filterwarnings('ignore')
 # NOW import YOLO (after env vars are set)
 try:
     from ultralytics import YOLO
+
     YOLO_AVAILABLE = True
 except Exception as e:
     print(f"⚠️ YOLO import warning (non-critical): {e}")
     YOLO = None
     YOLO_AVAILABLE = False
-=======
-import base64
-import os
-os.environ['YOLO_AUTOINSTALL'] = '0'  # Disable auto-install
-os.environ['YOLO_CONFIG_DIR'] = '/tmp/yolo_config'
->>>>>>> c5c009804f801dd7fbe5a2d7473a2aba0396b519
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
@@ -98,6 +92,7 @@ try:
 except:
     st.markdown("# 🧹 dirt_sniffer: Review Dashboard")
 
+
 @st.cache_resource
 def load_model():
     """Load YOLO model once"""
@@ -114,6 +109,7 @@ def load_model():
     except Exception as e:
         st.error(f"❌ Error loading model: {str(e)}")
         return None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TILING UTILITIES
@@ -147,6 +143,7 @@ def generate_tiles(image_h, image_w, tile_size=TILE_SIZE, overlap_pct=TILE_OVERL
 
     return tiles
 
+
 def iou(box1, box2):
     """Calculate IOU between two boxes [x1, y1, x2, y2]"""
     x1_min, y1_min, x1_max, y1_max = box1
@@ -166,6 +163,7 @@ def iou(box1, box2):
     union_area = box1_area + box2_area - inter_area
 
     return inter_area / union_area if union_area > 0 else 0.0
+
 
 def deduplicate_detections(particles, iou_threshold=IOU_DEDUP_THRESHOLD):
     """Remove duplicate detections from overlapping tiles"""
@@ -192,6 +190,7 @@ def deduplicate_detections(particles, iou_threshold=IOU_DEDUP_THRESHOLD):
 
     return kept
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
 # ─────────────────────────────────────────────────────────────────────────────
@@ -203,17 +202,19 @@ def get_size_bin(diameter_um):
             return label
     return "K"
 
+
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     """Check if background is black (safety check)"""
     try:
-        region = image_np[max(0, y-5):min(image_np.shape[0], y+h+5),
-                          max(0, x-5):min(image_np.shape[1], x+w+5)]
+        region = image_np[max(0, y - 5):min(image_np.shape[0], y + h + 5),
+        max(0, x - 5):min(image_np.shape[1], x + w + 5)]
         if region.size == 0:
             return False
         avg_brightness = np.mean(region)
         return avg_brightness < threshold
     except:
         return False
+
 
 def process_image(image_path, model, tile_size=TILE_SIZE):
     """
@@ -325,6 +326,7 @@ def process_image(image_path, model, tile_size=TILE_SIZE):
         st.error(f"❌ Error processing {image_path}: {str(e)}")
         return None
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -338,9 +340,11 @@ if "selected_particles" not in st.session_state:
 if "uploaded_files_cache" not in st.session_state:
     st.session_state.uploaded_files_cache = {}
 
+
 def push_undo():
     """Save state for undo"""
     st.session_state.undo_stack.append(deepcopy(st.session_state.results))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR - UPLOAD & CONTROLS
@@ -393,7 +397,7 @@ with st.sidebar:
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     for i, f in enumerate(uploaded_files):
-                        status.text(f"Processing {i+1}/{len(uploaded_files)}: {f.name}")
+                        status.text(f"Processing {i + 1}/{len(uploaded_files)}: {f.name}")
 
                         try:
                             temp_path = os.path.join(tmpdir, f.name)
@@ -406,7 +410,8 @@ with st.sidebar:
 
                             if img_h > custom_tile_size or img_w > custom_tile_size:
                                 num_tiles = int(np.ceil(img_w / custom_tile_size) * np.ceil(img_h / custom_tile_size))
-                                status.text(f"🟡 Tiling {f.name} ({img_w}x{img_h}) into {num_tiles} tiles @ {custom_tile_size}px...")
+                                status.text(
+                                    f"🟡 Tiling {f.name} ({img_w}x{img_h}) into {num_tiles} tiles @ {custom_tile_size}px...")
 
                             particles = process_image(temp_path, model, custom_tile_size)
                             if particles:
@@ -437,7 +442,8 @@ with st.sidebar:
 
     if st.session_state.results:
         total = sum(len([p for p in ps if not p["deleted"]]) for ps in st.session_state.results.values())
-        black_count = sum(len([p for p in ps if p["black_bg"] and not p["deleted"]]) for ps in st.session_state.results.values())
+        black_count = sum(
+            len([p for p in ps if p["black_bg"] and not p["deleted"]]) for ps in st.session_state.results.values())
 
         st.success(f"✅ {len(st.session_state.results)} images")
         st.info(f"📊 {total} particles")
@@ -490,7 +496,7 @@ else:
         data[cls] = {}
         for b, _, _ in SIZE_BINS:
             count = sum(len([p for p in ps if p["class"] == cls and p["size_bin"] == b and not p["deleted"]])
-                       for ps in st.session_state.results.values())
+                        for ps in st.session_state.results.values())
             data[cls][b] = count
 
     rows = []
@@ -517,10 +523,10 @@ else:
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         filter_class = st.multiselect("Filter by class:", ["Fiber", "Glass", "Metallic", "Other"],
-                                     default=["Fiber", "Glass", "Metallic", "Other"], key="fc")
+                                      default=["Fiber", "Glass", "Metallic", "Other"], key="fc")
     with col2:
         filter_bin = st.multiselect("Filter by size bin:", [b[0] for b in SIZE_BINS],
-                                   default=[b[0] for b in SIZE_BINS], key="fb")
+                                    default=[b[0] for b in SIZE_BINS], key="fb")
     with col3:
         show_black_only = st.checkbox("Black bg only")
     with col4:
@@ -533,8 +539,8 @@ else:
             if not p["deleted"]:
                 key = f"{img_name}_{idx}"
                 if (p["class"] in filter_class and
-                    p["size_bin"] in filter_bin and
-                    (not show_black_only or p["black_bg"])):
+                        p["size_bin"] in filter_bin and
+                        (not show_black_only or p["black_bg"])):
                     all_particles.append({
                         "key": key,
                         "img": img_name,
@@ -642,7 +648,7 @@ else:
                             x, y, w, h = p["x"], p["y"], p["w"], p["h"]
                             fig.add_shape(
                                 type="rect",
-                                x0=x, y0=y, x1=x+w, y1=y+h,
+                                x0=x, y0=y, x1=x + w, y1=y + h,
                                 line=dict(color="lime", width=3)
                             )
 
