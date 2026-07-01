@@ -386,30 +386,25 @@ else:
                     crop_y2 = min(img_np.shape[0], y + h + margin)
                     crop = img_np[crop_y1:crop_y2, crop_x1:crop_x2].copy()
 
-                    # Draw mask bounds if available
+                    # Draw tight bounds rectangle
                     try:
                         if p.get("mask_x_min") is not None and p.get("mask_x_max") is not None:
-                            from PIL import ImageDraw, Image as PILImage
+                            from PIL import ImageDraw
                             crop_pil = Image.fromarray(crop.astype(np.uint8)).convert('RGB')
+                            draw = ImageDraw.Draw(crop_pil)
 
-                            # Convert mask bounds from full image to crop local coords
+                            # Convert to crop coordinates
                             mx1 = int(max(0, p["mask_x_min"] - crop_x1))
                             my1 = int(max(0, p["mask_y_min"] - crop_y1))
                             mx2 = int(min(crop.shape[1], p["mask_x_max"] - crop_x1 + 1))
                             my2 = int(min(crop.shape[0], p["mask_y_max"] - crop_y1 + 1))
 
-                            # Draw green outline (try simpler approach)
-                            if mx1 < mx2 and my1 < my2 and mx2 - mx1 > 1 and my2 - my1 > 1:
-                                draw = ImageDraw.Draw(crop_pil)
-                                # Draw thick outline
+                            # Draw green rectangle
+                            if mx1 < mx2 and my1 < my2:
                                 for offset in range(3):
-                                    draw.rectangle(
-                                        [(mx1+offset, my1+offset), (mx2-offset, my2-offset)],
-                                        outline=(0, 255, 0)
-                                    )
-                                crop = np.array(crop_pil)
-                                if crop.ndim == 3 and crop.shape[2] == 3:
-                                    crop = crop[:, :, :3]  # Ensure RGB
+                                    draw.rectangle([(mx1+offset, my1+offset), (mx2-offset, my2-offset)], outline=(0, 255, 0))
+
+                            crop = np.array(crop_pil)
                     except Exception as e:
                         pass
 
