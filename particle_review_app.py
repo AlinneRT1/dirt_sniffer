@@ -3,6 +3,8 @@ Unified Particle Detection Gallery
 All-in-one: summary table + gallery + mass edit + full image zoom/pan
 KEY: Click particles to zoom into full image with pan controls
 
+UPDATED: Sizing from mask bounds instead of bbox
+
 Usage:
     streamlit run particle_review_gallery_unified.py
 """
@@ -20,7 +22,6 @@ from copy import deepcopy
 import plotly.graph_objects as go
 import plotly.express as px
 import base64
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
@@ -63,11 +64,13 @@ st.markdown(f"""
 
 st.divider()
 
+
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -100,7 +103,7 @@ def resize_image_for_display(image_array, max_height=1080):
 
 
 def process_image(image_path, model):
-    """Run YOLO inference"""
+    """Run YOLO inference - SIZE FROM MASK BOUNDS instead of bbox"""
     image = cv2.imread(image_path)
     if image is None:
         return None
@@ -113,13 +116,42 @@ def process_image(image_path, model):
         if r.boxes is None or r.masks is None:
             continue
 
-        for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
+        for i, (mask, box, cls, conf) in enumerate(zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf)):
             x1, y1, x2, y2 = [int(v) for v in box.tolist()]
             label = model.names[int(cls)]
 
             box_w = x2 - x1
             box_h = y2 - y1
-            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+
+            # ✅ NEW: Size from mask bounds (not bbox)
+            try:
+                mask_data = r.masks.data[i]
+                if hasattr(mask_data, 'cpu'):
+                    mask_array = mask_data.cpu().numpy()
+                else:
+                    mask_array = mask_data
+
+                # Find actual mask pixels
+                mask_pixels = np.where(mask_array > 0.5)
+
+                if len(mask_pixels[0]) > 0:
+                    # Get tight bounds from mask
+                    y_min, y_max = mask_pixels[0].min(), mask_pixels[0].max()
+                    x_min, x_max = mask_pixels[1].min(), mask_pixels[1].max()
+
+                    # Diameter from mask bounds (more accurate!)
+                    mask_w = x_max - x_min + 1
+                    mask_h = y_max - y_min + 1
+                    max_diam_um = max(mask_w, mask_h) * CALIBRATION_UM_PER_PIXEL
+                    size_method = "mask_bounds"
+                else:
+                    # Fallback to bbox if mask is empty
+                    max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+                    size_method = "bbox"
+            except Exception as e:
+                # Fallback to bbox if mask extraction fails
+                max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+                size_method = "bbox"
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
@@ -128,6 +160,7 @@ def process_image(image_path, model):
                 "class": label, "confidence": float(conf),
                 "diameter_um": round(max_diam_um, 1),
                 "size_bin": get_size_bin(max_diam_um),
+                "size_method": size_method,  # Track which method was used
                 "deleted": False,
                 "black_bg": is_black
             })
@@ -227,6 +260,7 @@ with st.sidebar:
                         "size_bin": p["size_bin"],
                         "confidence": round(p["confidence"], 3),
                         "black_background": p["black_bg"],
+                        "size_method": p.get("size_method", "unknown"),
                     })
 
         if rows:
@@ -349,8 +383,9 @@ else:
                     # Display crop
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
 
-                    # Info
-                    st.caption(f"{p['class']} | {p['size_bin']}")
+                    # Info (show sizing method)
+                    method = p.get("size_method", "?")
+                    st.caption(f"{p['class']} | {p['size_bin']}\n({method})")
 
                     # Inline select checkbox
                     is_selected = key in st.session_state.selected_particles
@@ -412,7 +447,7 @@ else:
                         )
 
                         fig.update_layout(
-                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm)",
+                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm) [{p.get('size_method', '?')}]",
                             showlegend=False,
                             hovermode="closest",
                             margin=dict(b=0, l=0, r=0, t=40),
