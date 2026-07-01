@@ -3,6 +3,8 @@ Unified Particle Detection Gallery
 All-in-one: summary table + gallery + mass edit + full image zoom/pan
 KEY: Click particles to zoom into full image with pan controls
 
+UPDATED: scipy edge detection for accurate sizing
+
 Usage:
     streamlit run particle_review_gallery_unified.py
 """
@@ -20,6 +22,7 @@ from copy import deepcopy
 import plotly.graph_objects as go
 import plotly.express as px
 import base64
+from scipy import ndimage
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -99,8 +102,53 @@ def resize_image_for_display(image_array, max_height=1080):
     return image_array
 
 
+def calculate_particle_size_accurate(mask_array, calibration):
+    """
+    Calculate accurate particle size using scipy edge detection
+    Returns: diameter_um, method
+    """
+
+    # Method 1: Edge detection within mask
+    try:
+        if mask_array is None or np.sum(mask_array) == 0:
+            raise ValueError("Empty mask")
+
+        # Find edges using Sobel operator
+        edges = ndimage.sobel(mask_array.astype(float))
+
+        # Find pixels that are edges
+        edge_pixels = np.where(edges > 0.1)
+
+        if len(edge_pixels[0]) > 0:
+            # Tight bounds from edges
+            y_min, y_max = edge_pixels[0].min(), edge_pixels[0].max()
+            x_min, x_max = edge_pixels[1].min(), edge_pixels[1].max()
+
+            diameter_pixels = max(x_max - x_min + 1, y_max - y_min + 1)
+            diameter_um = diameter_pixels * calibration
+            return round(diameter_um, 1), "edge_detect"
+    except:
+        pass
+
+    # Method 2: Tight bounds from mask pixels
+    try:
+        mask_pixels = np.where(mask_array > 0.5)
+        if len(mask_pixels[0]) > 0:
+            y_min, y_max = mask_pixels[0].min(), mask_pixels[0].max()
+            x_min, x_max = mask_pixels[1].min(), mask_pixels[1].max()
+
+            diameter_pixels = max(x_max - x_min + 1, y_max - y_min + 1)
+            diameter_um = diameter_pixels * calibration
+            return round(diameter_um, 1), "mask_bounds"
+    except:
+        pass
+
+    # Fallback (shouldn't reach here)
+    return None, "failed"
+
+
 def process_image(image_path, model):
-    """Run YOLO inference"""
+    """Run YOLO inference with accurate scipy-based sizing"""
     image = cv2.imread(image_path)
     if image is None:
         return None
@@ -113,21 +161,41 @@ def process_image(image_path, model):
         if r.boxes is None or r.masks is None:
             continue
 
-        for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
+        for i, (mask, box, cls, conf) in enumerate(zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf)):
             x1, y1, x2, y2 = [int(v) for v in box.tolist()]
             label = model.names[int(cls)]
 
             box_w = x2 - x1
             box_h = y2 - y1
-            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+
+            # Get mask and use scipy edge detection for accurate sizing
+            try:
+                mask_data = r.masks.data[i]
+                if hasattr(mask_data, 'cpu'):
+                    mask_array = mask_data.cpu().numpy()
+                else:
+                    mask_array = mask_data
+            except:
+                mask_array = None
+
+            # Calculate size using edge detection
+            diameter_um, size_method = calculate_particle_size_accurate(
+                mask_array, CALIBRATION_UM_PER_PIXEL
+            )
+
+            if diameter_um is None:
+                # Fallback to bbox
+                diameter_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+                size_method = "bbox"
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
             particles.append({
                 "x": x1, "y": y1, "w": box_w, "h": box_h,
                 "class": label, "confidence": float(conf),
-                "diameter_um": round(max_diam_um, 1),
-                "size_bin": get_size_bin(max_diam_um),
+                "diameter_um": diameter_um,
+                "size_bin": get_size_bin(diameter_um),
+                "size_method": size_method,
                 "deleted": False,
                 "black_bg": is_black
             })
@@ -227,6 +295,7 @@ with st.sidebar:
                         "size_bin": p["size_bin"],
                         "confidence": round(p["confidence"], 3),
                         "black_background": p["black_bg"],
+                        "size_method": p.get("size_method", "unknown"),
                     })
 
         if rows:
@@ -349,8 +418,9 @@ else:
                     # Display crop
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
 
-                    # Info
-                    st.caption(f"{p['class']} | {p['size_bin']}")
+                    # Info with sizing method
+                    method = p.get("size_method", "?")
+                    st.caption(f"{p['class']} | {p['size_bin']}\n({method})")
 
                     # Inline select checkbox
                     is_selected = key in st.session_state.selected_particles
@@ -412,7 +482,7 @@ else:
                         )
 
                         fig.update_layout(
-                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm)",
+                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm) [{p.get('size_method', '?')}]",
                             showlegend=False,
                             hovermode="closest",
                             margin=dict(b=0, l=0, r=0, t=40),
@@ -429,9 +499,7 @@ else:
                         with col2:
                             st.write(f"**Size:** {p['diameter_um']}µm ({p['size_bin']})")
                         with col3:
-                            if st.button("Close", key=f"close_{key}"):
-                                st.session_state[f"show_full_{key}"] = False
-                                st.rerun()
+                            st.write(f"**Method:** {p.get('size_method', '?')}")
 
         st.divider()
 
