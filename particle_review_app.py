@@ -23,6 +23,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,13 +65,11 @@ st.markdown(f"""
 
 st.divider()
 
-
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -378,32 +377,31 @@ else:
                     # Crop with tight margin
                     x, y, w, h = p["x"], p["y"], p["w"], p["h"]
                     margin = 15
-                    x1 = max(0, x - margin)
-                    y1 = max(0, y - margin)
-                    x2 = min(img_np.shape[1], x + w + margin)
-                    y2 = min(img_np.shape[0], y + h + margin)
-                    crop = img_np[y1:y2, x1:x2].copy()
+                    crop_x1 = max(0, x - margin)
+                    crop_y1 = max(0, y - margin)
+                    crop_x2 = min(img_np.shape[1], x + w + margin)
+                    crop_y2 = min(img_np.shape[0], y + h + margin)
+                    crop = img_np[crop_y1:crop_y2, crop_x1:crop_x2].copy()
 
                     # Draw mask bounds if available
                     try:
                         if p.get("mask_x_min") is not None and p.get("mask_x_max") is not None:
                             from PIL import ImageDraw
-
                             crop_pil = Image.fromarray(crop.astype(np.uint8))
                             draw = ImageDraw.Draw(crop_pil)
 
-                            # Convert mask bounds to crop coordinates
-                            mx1 = int(max(0, p["mask_x_min"] - x1))
-                            my1 = int(max(0, p["mask_y_min"] - y1))
-                            mx2 = int(min(crop.shape[1], p["mask_x_max"] - x1 + 1))
-                            my2 = int(min(crop.shape[0], p["mask_y_max"] - y1 + 1))
+                            # Convert mask bounds from full image to crop local coords
+                            mx1 = int(max(0, p["mask_x_min"] - crop_x1))
+                            my1 = int(max(0, p["mask_y_min"] - crop_y1))
+                            mx2 = int(min(crop.shape[1], p["mask_x_max"] - crop_x1 + 1))
+                            my2 = int(min(crop.shape[0], p["mask_y_max"] - crop_y1 + 1))
 
-                            # Draw green rectangle for mask bounds
+                            # Draw bright green rectangle (thicker line)
                             if mx1 < mx2 and my1 < my2:
-                                draw.rectangle([(mx1, my1), (mx2, my2)], outline=(0, 255, 0), width=2)
+                                draw.rectangle([(mx1, my1), (mx2, my2)], outline=(0, 255, 0), width=3)
                                 crop = np.array(crop_pil)
                     except Exception as e:
-                        pass  # Silently fail if drawing doesn't work
+                        pass
 
                     # Display crop with mask bounds
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
