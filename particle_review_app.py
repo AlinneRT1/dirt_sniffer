@@ -23,7 +23,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,11 +64,13 @@ st.markdown(f"""
 
 st.divider()
 
+
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -389,18 +390,24 @@ else:
                     # Draw mask bounds if available
                     if p.get("mask_x_min") is not None:
                         from PIL import ImageDraw
+
                         crop_pil = Image.fromarray(crop.astype(np.uint8))
                         draw = ImageDraw.Draw(crop_pil)
 
                         # Convert mask bounds to crop coordinates
-                        mx1 = max(0, p["mask_x_min"] - x1)
-                        my1 = max(0, p["mask_y_min"] - y1)
-                        mx2 = min(crop.shape[1], p["mask_x_max"] - x1)
-                        my2 = min(crop.shape[0], p["mask_y_max"] - y1)
+                        mx1 = int(max(0, p["mask_x_min"] - x1))
+                        my1 = int(max(0, p["mask_y_min"] - y1))
+                        mx2 = int(min(crop.shape[1], p["mask_x_max"] - x1))
+                        my2 = int(min(crop.shape[0], p["mask_y_max"] - y1))
 
-                        # Draw green rectangle for mask bounds
-                        draw.rectangle([mx1, my1, mx2, my2], outline=(0, 255, 0), width=2)
-                        crop = np.array(crop_pil)
+                        # Only draw if bounds are valid
+                        if mx1 < mx2 and my1 < my2:
+                            try:
+                                # Draw green rectangle for mask bounds
+                                draw.rectangle([(mx1, my1), (mx2, my2)], outline=(0, 255, 0), width=2)
+                                crop = np.array(crop_pil)
+                            except:
+                                pass  # If drawing fails, just show crop without bounds
 
                     # Display crop with mask bounds
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
