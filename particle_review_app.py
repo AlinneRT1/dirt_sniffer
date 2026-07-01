@@ -23,6 +23,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,13 +65,11 @@ st.markdown(f"""
 
 st.divider()
 
-
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -125,8 +124,10 @@ def process_image(image_path, model):
 
             # Initialize mask bounds variables
             x_min = x_max = y_min = y_max = None
+            size_method = "bbox"
+            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
 
-            # ✅ NEW: Size from mask bounds (not bbox)
+            # Try to get mask bounds (for visualization and sizing)
             try:
                 mask_data = r.masks.data[i]
                 if hasattr(mask_data, 'cpu'):
@@ -139,22 +140,17 @@ def process_image(image_path, model):
 
                 if len(mask_pixels[0]) > 0:
                     # Get tight bounds from mask
-                    y_min, y_max = mask_pixels[0].min(), mask_pixels[0].max()
-                    x_min, x_max = mask_pixels[1].min(), mask_pixels[1].max()
+                    y_min, y_max = int(mask_pixels[0].min()), int(mask_pixels[0].max())
+                    x_min, x_max = int(mask_pixels[1].min()), int(mask_pixels[1].max())
 
                     # Diameter from mask bounds (more accurate!)
                     mask_w = x_max - x_min + 1
                     mask_h = y_max - y_min + 1
                     max_diam_um = max(mask_w, mask_h) * CALIBRATION_UM_PER_PIXEL
                     size_method = "mask_bounds"
-                else:
-                    # Fallback to bbox if mask is empty
-                    max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
-                    size_method = "bbox"
             except Exception as e:
-                # Fallback to bbox if mask extraction fails
-                max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
-                size_method = "bbox"
+                # If mask extraction fails, keep bbox sizing
+                pass
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
@@ -163,11 +159,11 @@ def process_image(image_path, model):
                 "class": label, "confidence": float(conf),
                 "diameter_um": round(max_diam_um, 1),
                 "size_bin": get_size_bin(max_diam_um),
-                "size_method": size_method,  # Track which method was used
-                "mask_x_min": x_min if size_method == "mask_bounds" else None,
-                "mask_y_min": y_min if size_method == "mask_bounds" else None,
-                "mask_x_max": x_max if size_method == "mask_bounds" else None,
-                "mask_y_max": y_max if size_method == "mask_bounds" else None,
+                "size_method": size_method,
+                "mask_x_min": x_min,
+                "mask_y_min": y_min,
+                "mask_x_max": x_max,
+                "mask_y_max": y_max,
                 "deleted": False,
                 "black_bg": is_black
             })
@@ -390,7 +386,6 @@ else:
                     # Draw mask bounds if available
                     if p.get("mask_x_min") is not None:
                         from PIL import ImageDraw
-
                         crop_pil = Image.fromarray(crop.astype(np.uint8))
                         draw = ImageDraw.Draw(crop_pil)
 
