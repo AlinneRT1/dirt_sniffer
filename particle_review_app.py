@@ -23,7 +23,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,11 +64,13 @@ st.markdown(f"""
 
 st.divider()
 
+
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -387,6 +388,7 @@ else:
                     try:
                         if p.get("mask_x_min") is not None and p.get("mask_x_max") is not None:
                             from PIL import ImageDraw
+
                             crop_pil = Image.fromarray(crop.astype(np.uint8))
                             draw = ImageDraw.Draw(crop_pil)
 
@@ -406,9 +408,14 @@ else:
                     # Display crop with mask bounds
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
 
-                    # Info (show sizing method)
+                    # Info (show sizing method AND mask bounds for debugging)
                     method = p.get("size_method", "?")
-                    st.caption(f"{p['class']} | {p['size_bin']}\n({method})")
+                    mask_x_min = p.get("mask_x_min")
+                    mask_x_max = p.get("mask_x_max")
+                    debug_info = f"{p['class']} | {p['size_bin']}\n({method})"
+                    if mask_x_min is not None:
+                        debug_info += f"\n🟢 {int(mask_x_min)},{int(mask_x_max)}"
+                    st.caption(debug_info)
 
                     # Inline select checkbox
                     is_selected = key in st.session_state.selected_particles
