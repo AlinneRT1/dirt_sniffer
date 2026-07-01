@@ -19,6 +19,7 @@ from datetime import datetime
 from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
+from scipy import ndimage
 import base64
 
 
@@ -80,6 +81,51 @@ def get_size_bin(diameter_um):
     return "K"
 
 
+def calculate_particle_size_accurate(mask_array, calibration):
+    """
+    Calculate accurate particle size using edge detection
+    Returns: diameter_um, method, x_min, y_min, x_max, y_max
+    """
+
+    # Method 1: Edge detection within mask
+    try:
+        if mask_array is None or np.sum(mask_array) == 0:
+            raise ValueError("Empty mask")
+
+        # Find edges using Sobel operator
+        edges = ndimage.sobel(mask_array.astype(float))
+
+        # Find pixels that are edges
+        edge_pixels = np.where(edges > 0.1)
+
+        if len(edge_pixels[0]) > 0:
+            # Tight bounds from edges
+            y_min, y_max = edge_pixels[0].min(), edge_pixels[0].max()
+            x_min, x_max = edge_pixels[1].min(), edge_pixels[1].max()
+
+            diameter_pixels = max(x_max - x_min + 1, y_max - y_min + 1)
+            diameter_um = diameter_pixels * calibration
+            return round(diameter_um, 1), "edge_detect", int(x_min), int(y_min), int(x_max), int(y_max)
+    except:
+        pass
+
+    # Method 2: Tight bounds from mask pixels
+    try:
+        mask_pixels = np.where(mask_array > 0.5)
+        if len(mask_pixels[0]) > 0:
+            y_min, y_max = mask_pixels[0].min(), mask_pixels[0].max()
+            x_min, x_max = mask_pixels[1].min(), mask_pixels[1].max()
+
+            diameter_pixels = max(x_max - x_min + 1, y_max - y_min + 1)
+            diameter_um = diameter_pixels * calibration
+            return round(diameter_um, 1), "mask_bounds", int(x_min), int(y_min), int(x_max), int(y_max)
+    except:
+        pass
+
+    # Fallback (shouldn't reach here)
+    return None, "failed", None, None, None, None
+
+
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     region = image_np[max(0, y - 5):min(image_np.shape[0], y + h + 5),
     max(0, x - 5):min(image_np.shape[1], x + w + 5)]
@@ -125,43 +171,35 @@ def process_image(image_path, model):
             box_w = x2 - x1
             box_h = y2 - y1
 
-            # Initialize mask bounds variables
-            x_min = x_max = y_min = y_max = None
-            size_method = "bbox"
-            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
-
-            # Try to get mask bounds (for visualization and sizing)
+            # Get mask and use edge detection for accurate sizing
             try:
                 mask_data = r.masks.data[i]
                 if hasattr(mask_data, 'cpu'):
                     mask_array = mask_data.cpu().numpy()
                 else:
                     mask_array = mask_data
+            except:
+                mask_array = None
 
-                # Find actual mask pixels
-                mask_pixels = np.where(mask_array > 0.5)
+            # Calculate size using edge detection
+            diameter_um, size_method, x_min, y_min, x_max, y_max = calculate_particle_size_accurate(
+                mask_array, CALIBRATION_UM_PER_PIXEL
+            )
 
-                if len(mask_pixels[0]) > 0:
-                    # Get tight bounds from mask
-                    y_min, y_max = int(mask_pixels[0].min()), int(mask_pixels[0].max())
-                    x_min, x_max = int(mask_pixels[1].min()), int(mask_pixels[1].max())
-
-                    # Diameter from mask bounds (more accurate!)
-                    mask_w = x_max - x_min + 1
-                    mask_h = y_max - y_min + 1
-                    max_diam_um = max(mask_w, mask_h) * CALIBRATION_UM_PER_PIXEL
-                    size_method = "mask_bounds"
-            except Exception as e:
-                # If mask extraction fails, keep bbox sizing
-                pass
+            if diameter_um is None:
+                # Fallback to bbox
+                diameter_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+                size_method = "bbox"
+                x_min, y_min = x1, y1
+                x_max, y_max = x2, y2
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
             particles.append({
                 "x": x1, "y": y1, "w": box_w, "h": box_h,
                 "class": label, "confidence": float(conf),
-                "diameter_um": round(max_diam_um, 1),
-                "size_bin": get_size_bin(max_diam_um),
+                "diameter_um": round(diameter_um, 1),
+                "size_bin": get_size_bin(diameter_um),
                 "size_method": size_method,
                 "mask_x_min": x_min,
                 "mask_y_min": y_min,
