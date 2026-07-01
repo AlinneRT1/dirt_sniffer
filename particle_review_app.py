@@ -21,7 +21,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,11 +64,13 @@ except:
 
 st.divider()
 
+
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -84,7 +85,7 @@ def get_size_bin(diameter_um):
 
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     region = image_np[max(0, y - 5):min(image_np.shape[0], y + h + 5),
-                      max(0, x - 5):min(image_np.shape[1], x + w + 5)]
+    max(0, x - 5):min(image_np.shape[1], x + w + 5)]
     if region.size == 0:
         return False
     avg_brightness = np.mean(region)
@@ -223,10 +224,10 @@ def process_image(image_path, model):
             mask = r.masks.data[i].cpu().numpy() if hasattr(r.masks.data[i], 'cpu') else r.masks.data[i]
             mask_cropped = mask[y1:y2, x1:x2]
 
-            # Use hybrid sizing (debug first particle)
+            # Use hybrid sizing
             diameter_um, size_method = calculate_particle_size(
                 image, box, mask_cropped, CALIBRATION_UM_PER_PIXEL,
-                debug=(i == 0)  # Debug first particle only
+                debug=False
             )
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
@@ -283,6 +284,7 @@ with st.sidebar:
             else:
                 progress = st.progress(0)
                 status = st.empty()
+                debug_info = st.empty()
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     for i, f in enumerate(uploaded_files):
@@ -296,6 +298,15 @@ with st.sidebar:
                         if particles:
                             st.session_state.results[f.name] = particles
                             st.session_state.uploaded_files_cache[f.name] = f
+
+                            # Show debug info for first file
+                            if i == 0:
+                                size_methods = {}
+                                for p in particles:
+                                    method = p.get("size_method", "unknown")
+                                    size_methods[method] = size_methods.get(method, 0) + 1
+
+                                debug_info.info(f"**First file sizing methods:** {size_methods}")
 
                         progress.progress((i + 1) / len(uploaded_files))
 
