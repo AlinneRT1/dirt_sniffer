@@ -57,19 +57,37 @@ try:
                         model = st.session_state.model
 
                         st.write("🔍 Running inference...")
-                        results = model(img, conf=0.02, verbose=False)
+                        st.write(f"Input type: {type(img)}")
+                        st.write(f"Input size: {img.size}")
+
+                        try:
+                            st.write("Starting model prediction...")
+                            results = model(img, conf=0.02, verbose=False)
+                            st.write(f"✓ Prediction returned: {type(results)}")
+                            st.write(f"Results length: {len(results) if hasattr(results, '__len__') else 'N/A'}")
+                        except Exception as pred_err:
+                            st.error(f"Prediction error: {pred_err}")
+                            raise
+
                         st.write("✓ Inference complete")
 
                         particles = []
-                        for r in results:
+                        st.write("Processing results...")
+                        for i, r in enumerate(results):
+                            st.write(f"Result {i}: type={type(r)}")
                             if r.boxes is not None:
-                                for box, cls, conf in zip(r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
+                                st.write(f"  Boxes: {len(r.boxes)}")
+                                for j, (box, cls, conf) in enumerate(zip(r.boxes.xyxy, r.boxes.cls, r.boxes.conf)):
+                                    if j % 100 == 0:
+                                        st.write(f"  Processing box {j}...")
                                     x1, y1, x2, y2 = [int(v) for v in box.tolist()]
                                     particles.append({
                                         "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
                                         "class": model.names[int(cls)],
                                         "conf": float(conf),
                                     })
+                            else:
+                                st.write(f"  No boxes in result {i}")
 
                         st.session_state.results[file.name] = particles
                         st.write(f"✓ {len(particles)} particles detected!")
