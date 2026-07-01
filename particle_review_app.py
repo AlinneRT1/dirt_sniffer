@@ -19,7 +19,6 @@ from datetime import datetime
 from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
-import plotly.express as px
 import base64
 
 
@@ -102,8 +101,13 @@ def resize_image_for_display(image_array, max_height=1080):
 
 def process_image(image_path, model):
     """Run YOLO inference - SIZE FROM MASK BOUNDS instead of bbox"""
-    image = cv2.imread(image_path)
-    if image is None:
+    # Load with PIL (no cv2 system library issues)
+    img_pil = Image.open(image_path)
+    if img_pil.mode != 'RGB':
+        img_pil = img_pil.convert('RGB')
+    image = np.array(img_pil)
+
+    if image is None or image.size == 0:
         return None
 
     h, w = image.shape[:2]
