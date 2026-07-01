@@ -8,7 +8,6 @@ import streamlit as st
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-import numpy as np
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -33,17 +32,12 @@ with st.sidebar:
                 with status:
                     st.write("📂 Loading image...")
                     img = Image.open(file)
-                    st.write(f"✓ Image opened: {img.size} (mode: {img.mode})")
+                    st.write(f"✓ Image opened: {img.size}")
 
                     st.write("🔄 Converting to RGB...")
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
                     st.write("✓ RGB conversion done")
-
-                    st.write("📊 Converting to numpy array...")
-                    st.write("(This may take a minute for large images...)")
-                    arr = np.array(img)
-                    st.write(f"✓ Array shape: {arr.shape}, dtype: {arr.dtype}")
 
                     st.write("📥 Loading YOLO model...")
                     if st.session_state.model is None:
@@ -54,8 +48,8 @@ with st.sidebar:
 
                     model = st.session_state.model
 
-                    st.write("🔍 Running inference...")
-                    results = model(arr, conf=0.02, verbose=False)
+                    st.write("🔍 Running inference (pass PIL image directly)...")
+                    results = model(img, conf=0.02, verbose=False)
                     st.write("✓ Inference complete")
 
                     particles = []
@@ -75,8 +69,7 @@ with st.sidebar:
                 st.success("Done!")
 
             except MemoryError as e:
-                st.error(f"❌ Out of memory: Image too large for inference")
-                st.error("Try reducing image size or using a smaller tile")
+                st.error(f"❌ Out of memory")
             except Exception as e:
                 st.error(f"❌ Error: {e}")
                 import traceback
