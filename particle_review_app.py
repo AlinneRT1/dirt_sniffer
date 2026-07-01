@@ -1,13 +1,14 @@
 """
-Unified Particle Detection Gallery - HYBRID SIZING
+Unified Particle Detection Gallery
 All-in-one: summary table + gallery + mass edit + full image zoom/pan
-Sizing: Try contour detection → Fall back to mask → Fall back to bbox
+KEY: Click particles to zoom into full image with pan controls
 
 Usage:
-    streamlit run particle_review_app.py
+    streamlit run particle_review_gallery_unified.py
 """
 
 import streamlit as st
+import cv2
 import numpy as np
 from PIL import Image
 import pandas as pd
@@ -17,7 +18,9 @@ from datetime import datetime
 from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
+import plotly.express as px
 import base64
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
@@ -48,27 +51,23 @@ CLASS_COLORS = {
 
 st.set_page_config(page_title="Particle Detection Review", page_icon="icon.ico", layout="wide")
 
-try:
-    with open("icon.png", "rb") as f:
-        img = base64.b64encode(f.read()).decode()
-    st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:15px;">
-        <img src="data:image/png;base64,{img}" width="80">
-        <h1 style="margin:0;">🧹dirt_sniffer: Review Dashboard</h1>
-    </div>
-    """, unsafe_allow_html=True)
-except:
-    st.markdown("# 🧹 dirt_sniffer: Review Dashboard")
+with open("icon.png", "rb") as f:
+    img = base64.b64encode(f.read()).decode()
+
+st.markdown(f"""
+<div style="display:flex;align-items:center;gap:15px;">
+    <img src="data:image/png;base64,{img}" width="80">
+    <h1 style="margin:0;">🧹dirt_sniffer: Review Dashboard</h1>
+</div>
+""", unsafe_allow_html=True)
 
 st.divider()
-
 
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -90,82 +89,6 @@ def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     return avg_brightness < threshold
 
 
-def calculate_particle_size(image_np, box, mask_region, calibration):
-    """
-    Size from mask tight bounds (not bbox, not area)
-    Returns diameter from actual mask boundary
-    """
-    x1, y1, x2, y2 = [int(v) for v in box.tolist()]
-    box_w = x2 - x1
-    box_h = y2 - y1
-
-    try:
-        # Find actual mask pixels
-        mask_pixels = np.where(mask_region > 0.5)  # Threshold for mask
-
-        if len(mask_pixels[0]) == 0:
-            raise ValueError("No mask pixels")
-
-        # Get tight bounds of actual mask
-        y_min, y_max = mask_pixels[0].min(), mask_pixels[0].max()
-        x_min, x_max = mask_pixels[1].min(), mask_pixels[1].max()
-
-        # Calculate from tight bounds
-        tight_w = x_max - x_min + 1
-        tight_h = y_max - y_min + 1
-
-        # Use max dimension as diameter (more accurate than bbox)
-        diameter_pixels = max(tight_w, tight_h)
-        diameter_um = diameter_pixels * calibration
-
-        return round(diameter_um, 1), "mask_bounds"
-
-    except Exception as e:
-        pass
-
-    # Fallback to bbox only if mask fails
-    diameter_um = max(box_w, box_h) * calibration
-    return round(diameter_um, 1), "bbox"
-
-
-def draw_mask_outline(image_np, mask_region, color=(0, 255, 0), thickness=2):
-    """
-    Draw mask outline on image using PIL (no cv2 needed)
-    """
-    from PIL import ImageDraw
-
-    try:
-        # Convert to PIL Image
-        if isinstance(image_np, np.ndarray):
-            img_pil = Image.fromarray(image_np.astype(np.uint8))
-        else:
-            img_pil = image_np.copy()
-
-        # Find mask boundary pixels
-        mask_binary = (mask_region > 0.5).astype(np.uint8)
-
-        # Simple boundary detection: pixels where mask is true but have non-mask neighbors
-        boundary = np.zeros_like(mask_binary)
-        for y in range(1, mask_binary.shape[0] - 1):
-            for x in range(1, mask_binary.shape[1] - 1):
-                if mask_binary[y, x]:
-                    # Check if on edge
-                    neighbors = mask_binary[y - 1:y + 2, x - 1:x + 2]
-                    if neighbors.min() == 0:  # Has non-mask neighbor
-                        boundary[y, x] = 1
-
-        # Draw boundary
-        draw = ImageDraw.Draw(img_pil)
-        boundary_pts = np.where(boundary)
-        for y, x in zip(boundary_pts[0], boundary_pts[1]):
-            draw.point((x, y), fill=color)
-
-        return np.array(img_pil)
-
-    except:
-        return image_np
-
-
 def resize_image_for_display(image_array, max_height=1080):
     """Resize image to max height for faster display"""
     h, w = image_array.shape[:2]
@@ -177,15 +100,9 @@ def resize_image_for_display(image_array, max_height=1080):
 
 
 def process_image(image_path, model):
-    """Run YOLO inference - using PIL instead of cv2"""
-
-    # Load with PIL (no system library issues)
-    img_pil = Image.open(image_path)
-    if img_pil.mode != 'RGB':
-        img_pil = img_pil.convert('RGB')
-    image = np.array(img_pil)
-
-    if image is None or image.size == 0:
+    """Run YOLO inference"""
+    image = cv2.imread(image_path)
+    if image is None:
         return None
 
     h, w = image.shape[:2]
@@ -196,38 +113,26 @@ def process_image(image_path, model):
         if r.boxes is None or r.masks is None:
             continue
 
-        for i, (box, cls, conf) in enumerate(zip(r.boxes.xyxy, r.boxes.cls, r.boxes.conf)):
+        for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
             x1, y1, x2, y2 = [int(v) for v in box.tolist()]
             label = model.names[int(cls)]
 
             box_w = x2 - x1
             box_h = y2 - y1
-
-            # Get mask for this detection
-            try:
-                mask = r.masks.data[i].cpu().numpy() if hasattr(r.masks.data[i], 'cpu') else r.masks.data[i]
-                mask_cropped = mask[y1:y2, x1:x2]
-            except:
-                mask_cropped = np.ones((box_h, box_w))  # Fallback to all ones
-
-            # Use mask-based sizing
-            diameter_um, size_method = calculate_particle_size(
-                image, box, mask_cropped, CALIBRATION_UM_PER_PIXEL
-            )
+            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
             particles.append({
                 "x": x1, "y": y1, "w": box_w, "h": box_h,
                 "class": label, "confidence": float(conf),
-                "diameter_um": diameter_um,
-                "size_bin": get_size_bin(diameter_um),
-                "size_method": size_method,
+                "diameter_um": round(max_diam_um, 1),
+                "size_bin": get_size_bin(max_diam_um),
                 "deleted": False,
                 "black_bg": is_black
             })
 
-    return particles if particles else None
+    return particles
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -269,7 +174,6 @@ with st.sidebar:
             else:
                 progress = st.progress(0)
                 status = st.empty()
-                debug_info = st.empty()
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     for i, f in enumerate(uploaded_files):
@@ -283,15 +187,6 @@ with st.sidebar:
                         if particles:
                             st.session_state.results[f.name] = particles
                             st.session_state.uploaded_files_cache[f.name] = f
-
-                            # Show debug info for first file
-                            if i == 0:
-                                size_methods = {}
-                                for p in particles:
-                                    method = p.get("size_method", "unknown")
-                                    size_methods[method] = size_methods.get(method, 0) + 1
-
-                                debug_info.info(f"**First file sizing methods:** {size_methods}")
 
                         progress.progress((i + 1) / len(uploaded_files))
 
@@ -332,7 +227,6 @@ with st.sidebar:
                         "size_bin": p["size_bin"],
                         "confidence": round(p["confidence"], 3),
                         "black_background": p["black_bg"],
-                        "size_method": p.get("size_method", "unknown"),
                     })
 
         if rows:
@@ -420,7 +314,6 @@ else:
 
         # Pagination
         total_pages = max(1, (len(all_particles) + items_per_page - 1) // items_per_page)
-
         if total_pages > 1:
             page = st.slider("Page:", 1, total_pages, 1) - 1
         else:
@@ -456,9 +349,8 @@ else:
                     # Display crop
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
 
-                    # Info with sizing method
-                    method = p.get("size_method", "?")
-                    st.caption(f"{p['class']} | {p['size_bin']}\n({method})")
+                    # Info
+                    st.caption(f"{p['class']} | {p['size_bin']}")
 
                     # Inline select checkbox
                     is_selected = key in st.session_state.selected_particles
@@ -520,7 +412,7 @@ else:
                         )
 
                         fig.update_layout(
-                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm) [{p.get('size_method', '?')}]",
+                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm)",
                             showlegend=False,
                             hovermode="closest",
                             margin=dict(b=0, l=0, r=0, t=40),
@@ -537,13 +429,9 @@ else:
                         with col2:
                             st.write(f"**Size:** {p['diameter_um']}µm ({p['size_bin']})")
                         with col3:
-                            st.write(f"**Method:** {p.get('size_method', '?')}")
-
-                        st.divider()
-
-                        if st.button("Close", key=f"close_{key}"):
-                            st.session_state[f"show_full_{key}"] = False
-                            st.rerun()
+                            if st.button("Close", key=f"close_{key}"):
+                                st.session_state[f"show_full_{key}"] = False
+                                st.rerun()
 
         st.divider()
 
@@ -568,9 +456,8 @@ else:
             if st.button("🔥 Execute Action"):
                 push_undo()
                 for key in st.session_state.selected_particles:
-                    parts = key.rsplit("_", 1)
-                    img_name = parts[0]
-                    idx = int(parts[1])
+                    img_name, idx = key.rsplit("_", 1)
+                    idx = int(idx)
                     if action == "Delete All Selected":
                         st.session_state.results[img_name][idx]["deleted"] = True
                     else:
