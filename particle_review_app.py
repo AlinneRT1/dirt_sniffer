@@ -3,13 +3,12 @@ Unified Particle Detection Gallery
 All-in-one: summary table + gallery + mass edit + full image zoom/pan
 KEY: Click particles to zoom into full image with pan controls
 
-UPDATED: Sizing from mask bounds instead of bbox
-
 Usage:
     streamlit run particle_review_gallery_unified.py
 """
 
 import streamlit as st
+import cv2
 import numpy as np
 from PIL import Image
 import pandas as pd
@@ -19,7 +18,7 @@ from datetime import datetime
 from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
-from scipy import ndimage
+import plotly.express as px
 import base64
 
 
@@ -81,51 +80,6 @@ def get_size_bin(diameter_um):
     return "K"
 
 
-def calculate_particle_size_accurate(mask_array, calibration):
-    """
-    Calculate accurate particle size using edge detection
-    Returns: diameter_um, method, x_min, y_min, x_max, y_max
-    """
-
-    # Method 1: Edge detection within mask
-    try:
-        if mask_array is None or np.sum(mask_array) == 0:
-            raise ValueError("Empty mask")
-
-        # Find edges using Sobel operator
-        edges = ndimage.sobel(mask_array.astype(float))
-
-        # Find pixels that are edges
-        edge_pixels = np.where(edges > 0.1)
-
-        if len(edge_pixels[0]) > 0:
-            # Tight bounds from edges
-            y_min, y_max = edge_pixels[0].min(), edge_pixels[0].max()
-            x_min, x_max = edge_pixels[1].min(), edge_pixels[1].max()
-
-            diameter_pixels = max(x_max - x_min + 1, y_max - y_min + 1)
-            diameter_um = diameter_pixels * calibration
-            return round(diameter_um, 1), "edge_detect", int(x_min), int(y_min), int(x_max), int(y_max)
-    except:
-        pass
-
-    # Method 2: Tight bounds from mask pixels
-    try:
-        mask_pixels = np.where(mask_array > 0.5)
-        if len(mask_pixels[0]) > 0:
-            y_min, y_max = mask_pixels[0].min(), mask_pixels[0].max()
-            x_min, x_max = mask_pixels[1].min(), mask_pixels[1].max()
-
-            diameter_pixels = max(x_max - x_min + 1, y_max - y_min + 1)
-            diameter_um = diameter_pixels * calibration
-            return round(diameter_um, 1), "mask_bounds", int(x_min), int(y_min), int(x_max), int(y_max)
-    except:
-        pass
-
-    # Fallback (shouldn't reach here)
-    return None, "failed", None, None, None, None
-
-
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     region = image_np[max(0, y - 5):min(image_np.shape[0], y + h + 5),
     max(0, x - 5):min(image_np.shape[1], x + w + 5)]
@@ -146,14 +100,9 @@ def resize_image_for_display(image_array, max_height=1080):
 
 
 def process_image(image_path, model):
-    """Run YOLO inference - SIZE FROM MASK BOUNDS instead of bbox"""
-    # Load with PIL (no cv2 system library issues)
-    img_pil = Image.open(image_path)
-    if img_pil.mode != 'RGB':
-        img_pil = img_pil.convert('RGB')
-    image = np.array(img_pil)
-
-    if image is None or image.size == 0:
+    """Run YOLO inference"""
+    image = cv2.imread(image_path)
+    if image is None:
         return None
 
     h, w = image.shape[:2]
@@ -164,47 +113,21 @@ def process_image(image_path, model):
         if r.boxes is None or r.masks is None:
             continue
 
-        for i, (mask, box, cls, conf) in enumerate(zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf)):
+        for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
             x1, y1, x2, y2 = [int(v) for v in box.tolist()]
             label = model.names[int(cls)]
 
             box_w = x2 - x1
             box_h = y2 - y1
-
-            # Get mask and use edge detection for accurate sizing
-            try:
-                mask_data = r.masks.data[i]
-                if hasattr(mask_data, 'cpu'):
-                    mask_array = mask_data.cpu().numpy()
-                else:
-                    mask_array = mask_data
-            except:
-                mask_array = None
-
-            # Calculate size using edge detection
-            diameter_um, size_method, x_min, y_min, x_max, y_max = calculate_particle_size_accurate(
-                mask_array, CALIBRATION_UM_PER_PIXEL
-            )
-
-            if diameter_um is None:
-                # Fallback to bbox
-                diameter_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
-                size_method = "bbox"
-                x_min, y_min = x1, y1
-                x_max, y_max = x2, y2
+            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
             particles.append({
                 "x": x1, "y": y1, "w": box_w, "h": box_h,
                 "class": label, "confidence": float(conf),
-                "diameter_um": round(diameter_um, 1),
-                "size_bin": get_size_bin(diameter_um),
-                "size_method": size_method,
-                "mask_x_min": x_min,
-                "mask_y_min": y_min,
-                "mask_x_max": x_max,
-                "mask_y_max": y_max,
+                "diameter_um": round(max_diam_um, 1),
+                "size_bin": get_size_bin(max_diam_um),
                 "deleted": False,
                 "black_bg": is_black
             })
@@ -304,7 +227,6 @@ with st.sidebar:
                         "size_bin": p["size_bin"],
                         "confidence": round(p["confidence"], 3),
                         "black_background": p["black_bg"],
-                        "size_method": p.get("size_method", "unknown"),
                     })
 
         if rows:
@@ -418,45 +340,17 @@ else:
                     # Crop with tight margin
                     x, y, w, h = p["x"], p["y"], p["w"], p["h"]
                     margin = 15
-                    crop_x1 = max(0, x - margin)
-                    crop_y1 = max(0, y - margin)
-                    crop_x2 = min(img_np.shape[1], x + w + margin)
-                    crop_y2 = min(img_np.shape[0], y + h + margin)
-                    crop = img_np[crop_y1:crop_y2, crop_x1:crop_x2].copy()
+                    x1 = max(0, x - margin)
+                    y1 = max(0, y - margin)
+                    x2 = min(img_np.shape[1], x + w + margin)
+                    y2 = min(img_np.shape[0], y + h + margin)
+                    crop = img_np[y1:y2, x1:x2]
 
-                    # Draw tight bounds rectangle
-                    try:
-                        if p.get("mask_x_min") is not None and p.get("mask_x_max") is not None:
-                            from PIL import ImageDraw
-                            crop_pil = Image.fromarray(crop.astype(np.uint8)).convert('RGB')
-                            draw = ImageDraw.Draw(crop_pil)
-
-                            # Convert to crop coordinates
-                            mx1 = int(max(0, p["mask_x_min"] - crop_x1))
-                            my1 = int(max(0, p["mask_y_min"] - crop_y1))
-                            mx2 = int(min(crop.shape[1], p["mask_x_max"] - crop_x1 + 1))
-                            my2 = int(min(crop.shape[0], p["mask_y_max"] - crop_y1 + 1))
-
-                            # Draw green rectangle
-                            if mx1 < mx2 and my1 < my2:
-                                for offset in range(3):
-                                    draw.rectangle([(mx1+offset, my1+offset), (mx2-offset, my2-offset)], outline=(0, 255, 0))
-
-                            crop = np.array(crop_pil)
-                    except Exception as e:
-                        pass
-
-                    # Display crop with mask bounds
+                    # Display crop
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
 
-                    # Info (show sizing method AND mask bounds for debugging)
-                    method = p.get("size_method", "?")
-                    mask_x_min = p.get("mask_x_min")
-                    mask_x_max = p.get("mask_x_max")
-                    debug_info = f"{p['class']} | {p['size_bin']}\n({method})"
-                    if mask_x_min is not None:
-                        debug_info += f"\n🟢 {int(mask_x_min)},{int(mask_x_max)}"
-                    st.caption(debug_info)
+                    # Info
+                    st.caption(f"{p['class']} | {p['size_bin']}")
 
                     # Inline select checkbox
                     is_selected = key in st.session_state.selected_particles
@@ -518,7 +412,7 @@ else:
                         )
 
                         fig.update_layout(
-                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm) [{p.get('size_method', '?')}]",
+                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm)",
                             showlegend=False,
                             hovermode="closest",
                             margin=dict(b=0, l=0, r=0, t=40),
