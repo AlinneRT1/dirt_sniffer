@@ -314,7 +314,10 @@ else:
 
         # Pagination
         total_pages = max(1, (len(all_particles) + items_per_page - 1) // items_per_page)
-        page = st.slider("Page:", 1, total_pages, 1) - 1
+        if total_pages > 1:
+            page = st.slider("Page:", 1, total_pages, 1) - 1
+        else:
+            page = 0
 
         start_idx = page * items_per_page
         end_idx = start_idx + items_per_page
