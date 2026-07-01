@@ -1,10 +1,10 @@
 """
-Unified Particle Detection Gallery
+Unified Particle Detection Gallery - HYBRID SIZING
 All-in-one: summary table + gallery + mass edit + full image zoom/pan
-KEY: Click particles to zoom into full image with pan controls
+Sizing: Try contour detection → Fall back to mask → Fall back to bbox
 
 Usage:
-    streamlit run particle_review_gallery_unified.py
+    streamlit run particle_review_app.py
 """
 
 import streamlit as st
@@ -21,13 +21,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
 MODEL_PATH = "models/best.pt"
-CALIBRATION_UM_PER_PIXEL = 1.299
+CALIBRATION_UM_PER_PIXEL = 1.029
 BLACK_BG_THRESHOLD = 30
 
 SIZE_BINS = [
@@ -51,23 +50,27 @@ CLASS_COLORS = {
 
 st.set_page_config(page_title="Particle Detection Review", page_icon="icon.ico", layout="wide")
 
-with open("icon.png", "rb") as f:
-    img = base64.b64encode(f.read()).decode()
-
-st.markdown(f"""
-<div style="display:flex;align-items:center;gap:15px;">
-    <img src="data:image/png;base64,{img}" width="80">
-    <h1 style="margin:0;">🧹dirt_sniffer: Review Dashboard</h1>
-</div>
-""", unsafe_allow_html=True)
+try:
+    with open("icon.png", "rb") as f:
+        img = base64.b64encode(f.read()).decode()
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;gap:15px;">
+        <img src="data:image/png;base64,{img}" width="80">
+        <h1 style="margin:0;">🧹dirt_sniffer: Review Dashboard</h1>
+    </div>
+    """, unsafe_allow_html=True)
+except:
+    st.markdown("# 🧹 dirt_sniffer: Review Dashboard")
 
 st.divider()
+
 
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -89,6 +92,70 @@ def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     return avg_brightness < threshold
 
 
+def calculate_particle_size(image_np, box, mask_region, calibration):
+    """
+    Hybrid sizing: try contour detection first, fall back to mask
+
+    1. Try to detect actual particle edge within bounding box
+    2. If that fails, use mask area
+    3. Last resort: use bounding box
+    """
+    x1, y1, x2, y2 = [int(v) for v in box.tolist()]
+    box_w = x2 - x1
+    box_h = y2 - y1
+
+    # Extract bounding box region
+    try:
+        region = image_np[y1:y2, x1:x2]
+
+        if region.size == 0:
+            raise ValueError("Empty region")
+
+        # Convert to grayscale for edge detection
+        if len(region.shape) == 3:
+            gray = cv2.cvtColor(region, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = region
+
+        # Prepare mask for this region
+        mask_bbox = mask_region.astype(np.uint8) * 255
+
+        # Find edges within the particle
+        edges = cv2.Canny(gray, 50, 150)
+        edges = cv2.bitwise_and(edges, edges, mask=mask_bbox)
+
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours and len(contours) > 0:
+            # Use largest contour
+            largest_contour = max(contours, key=cv2.contourArea)
+            contour_area = cv2.contourArea(largest_contour)
+
+            if contour_area > 100:  # Must be substantial
+                # Calculate diameter from contour area
+                diameter_pixels = np.sqrt(4 * contour_area / np.pi)
+                diameter_um = diameter_pixels * calibration
+                return round(diameter_um, 1), "contour"
+
+    except Exception as e:
+        pass
+
+    # Fallback 1: use mask area
+    try:
+        mask_area = np.sum(mask_region)
+        if mask_area > 0:
+            diameter_pixels = np.sqrt(4 * mask_area / np.pi)
+            diameter_um = diameter_pixels * calibration
+            return round(diameter_um, 1), "mask"
+    except:
+        pass
+
+    # Last resort: bounding box
+    diameter_um = max(box_w, box_h) * calibration
+    return round(diameter_um, 1), "bbox"
+
+
 def resize_image_for_display(image_array, max_height=1080):
     """Resize image to max height for faster display"""
     h, w = image_array.shape[:2]
@@ -100,7 +167,7 @@ def resize_image_for_display(image_array, max_height=1080):
 
 
 def process_image(image_path, model):
-    """Run YOLO inference"""
+    """Run YOLO inference with hybrid sizing"""
     image = cv2.imread(image_path)
     if image is None:
         return None
@@ -113,26 +180,33 @@ def process_image(image_path, model):
         if r.boxes is None or r.masks is None:
             continue
 
-        for mask, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
+        for i, (box, cls, conf) in enumerate(zip(r.boxes.xyxy, r.boxes.cls, r.boxes.conf)):
             x1, y1, x2, y2 = [int(v) for v in box.tolist()]
             label = model.names[int(cls)]
 
             box_w = x2 - x1
             box_h = y2 - y1
-            max_diam_um = max(box_w, box_h) * CALIBRATION_UM_PER_PIXEL
+
+            # Get mask for this detection
+            mask = r.masks.data[i].cpu().numpy() if hasattr(r.masks.data[i], 'cpu') else r.masks.data[i]
+            mask_cropped = mask[y1:y2, x1:x2]
+
+            # Use hybrid sizing
+            diameter_um, size_method = calculate_particle_size(image, box, mask_cropped, CALIBRATION_UM_PER_PIXEL)
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
             particles.append({
                 "x": x1, "y": y1, "w": box_w, "h": box_h,
                 "class": label, "confidence": float(conf),
-                "diameter_um": round(max_diam_um, 1),
-                "size_bin": get_size_bin(max_diam_um),
+                "diameter_um": diameter_um,
+                "size_bin": get_size_bin(diameter_um),
+                "size_method": size_method,
                 "deleted": False,
                 "black_bg": is_black
             })
 
-    return particles
+    return particles if particles else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,6 +301,7 @@ with st.sidebar:
                         "size_bin": p["size_bin"],
                         "confidence": round(p["confidence"], 3),
                         "black_background": p["black_bg"],
+                        "size_method": p.get("size_method", "unknown"),
                     })
 
         if rows:
@@ -314,6 +389,7 @@ else:
 
         # Pagination
         total_pages = max(1, (len(all_particles) + items_per_page - 1) // items_per_page)
+
         if total_pages > 1:
             page = st.slider("Page:", 1, total_pages, 1) - 1
         else:
@@ -349,8 +425,9 @@ else:
                     # Display crop
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
 
-                    # Info
-                    st.caption(f"{p['class']} | {p['size_bin']}")
+                    # Info with sizing method
+                    method = p.get("size_method", "?")
+                    st.caption(f"{p['class']} | {p['size_bin']}\n({method})")
 
                     # Inline select checkbox
                     is_selected = key in st.session_state.selected_particles
@@ -412,7 +489,7 @@ else:
                         )
 
                         fig.update_layout(
-                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm)",
+                            title=f"{img_name} | {p['class']} ({p['diameter_um']}µm) [{p.get('size_method', '?')}]",
                             showlegend=False,
                             hovermode="closest",
                             margin=dict(b=0, l=0, r=0, t=40),
@@ -429,9 +506,13 @@ else:
                         with col2:
                             st.write(f"**Size:** {p['diameter_um']}µm ({p['size_bin']})")
                         with col3:
-                            if st.button("Close", key=f"close_{key}"):
-                                st.session_state[f"show_full_{key}"] = False
-                                st.rerun()
+                            st.write(f"**Method:** {p.get('size_method', '?')}")
+
+                        st.divider()
+
+                        if st.button("Close", key=f"close_{key}"):
+                            st.session_state[f"show_full_{key}"] = False
+                            st.rerun()
 
         st.divider()
 
@@ -456,8 +537,9 @@ else:
             if st.button("🔥 Execute Action"):
                 push_undo()
                 for key in st.session_state.selected_particles:
-                    img_name, idx = key.rsplit("_", 1)
-                    idx = int(idx)
+                    parts = key.rsplit("_", 1)
+                    img_name = parts[0]
+                    idx = int(parts[1])
                     if action == "Delete All Selected":
                         st.session_state.results[img_name][idx]["deleted"] = True
                     else:
