@@ -8,7 +8,6 @@ Usage:
 """
 
 import streamlit as st
-import cv2
 import numpy as np
 from PIL import Image
 import pandas as pd
@@ -18,7 +17,6 @@ from datetime import datetime
 from ultralytics import YOLO
 from copy import deepcopy
 import plotly.graph_objects as go
-import plotly.express as px
 import base64
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,9 +126,15 @@ def resize_image_for_display(image_array, max_height=1080):
 
 
 def process_image(image_path, model):
-    """Run YOLO inference with hybrid sizing"""
-    image = cv2.imread(image_path)
-    if image is None:
+    """Run YOLO inference - using PIL instead of cv2"""
+
+    # Load with PIL (no system library issues)
+    img_pil = Image.open(image_path)
+    if img_pil.mode != 'RGB':
+        img_pil = img_pil.convert('RGB')
+    image = np.array(img_pil)
+
+    if image is None or image.size == 0:
         return None
 
     h, w = image.shape[:2]
@@ -149,8 +153,11 @@ def process_image(image_path, model):
             box_h = y2 - y1
 
             # Get mask for this detection
-            mask = r.masks.data[i].cpu().numpy() if hasattr(r.masks.data[i], 'cpu') else r.masks.data[i]
-            mask_cropped = mask[y1:y2, x1:x2]
+            try:
+                mask = r.masks.data[i].cpu().numpy() if hasattr(r.masks.data[i], 'cpu') else r.masks.data[i]
+                mask_cropped = mask[y1:y2, x1:x2]
+            except:
+                mask_cropped = np.ones((box_h, box_w))  # Fallback to all ones
 
             # Use mask-based sizing
             diameter_um, size_method = calculate_particle_size(
