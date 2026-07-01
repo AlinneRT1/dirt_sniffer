@@ -92,100 +92,28 @@ def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     return avg_brightness < threshold
 
 
-def calculate_particle_size(image_np, box, mask_region, calibration, debug=False):
+def calculate_particle_size(image_np, box, mask_region, calibration):
     """
-    Hybrid sizing: try contour detection first, fall back to mask
-
-    1. Try to detect actual particle edge within bounding box
-    2. If that fails, use mask area
-    3. Last resort: use bounding box
+    Simple sizing: Use mask area (YOLO's segmentation)
+    Falls back to bbox if mask fails
     """
     x1, y1, x2, y2 = [int(v) for v in box.tolist()]
     box_w = x2 - x1
     box_h = y2 - y1
 
-    # Extract bounding box region
-    try:
-        region = image_np[y1:y2, x1:x2]
-
-        if region.size == 0:
-            if debug:
-                print(f"DEBUG: Empty region")
-            raise ValueError("Empty region")
-
-        # Convert to grayscale for edge detection
-        if len(region.shape) == 3:
-            gray = cv2.cvtColor(region, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = region
-
-        # Prepare mask for this region
-        mask_bbox = mask_region.astype(np.uint8) * 255
-        mask_area = np.sum(mask_bbox)
-
-        if debug:
-            print(f"DEBUG: Box size={box_w}x{box_h}, mask_area={mask_area}")
-
-        # Find edges within the particle
-        edges = cv2.Canny(gray, 50, 150)
-        edges = cv2.bitwise_and(edges, edges, mask=mask_bbox)
-
-        # Find contours
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        if debug:
-            print(f"DEBUG: Found {len(contours) if contours else 0} contours")
-
-        if contours and len(contours) > 0:
-            # Use largest contour
-            largest_contour = max(contours, key=cv2.contourArea)
-            contour_area = cv2.contourArea(largest_contour)
-
-            if debug:
-                print(f"DEBUG: Largest contour area={contour_area}")
-
-            # Lower threshold - use contour if it's substantial
-            if contour_area > 50:  # Relaxed from 100
-                # Calculate diameter from contour area
-                diameter_pixels = np.sqrt(4 * contour_area / np.pi)
-                diameter_um = diameter_pixels * calibration
-
-                if debug:
-                    print(f"✓ CONTOUR SUCCESS: {diameter_um}µm")
-
-                return round(diameter_um, 1), "contour"
-            elif debug:
-                print(f"Contour area too small ({contour_area} < 50)")
-
-    except Exception as e:
-        if debug:
-            print(f"DEBUG: Contour error: {e}")
-        pass
-
-    # Fallback 1: use mask area
+    # Try mask first
     try:
         mask_area = np.sum(mask_region)
         if mask_area > 0:
+            # Calculate diameter from mask area
             diameter_pixels = np.sqrt(4 * mask_area / np.pi)
             diameter_um = diameter_pixels * calibration
-
-            if debug:
-                print(f"✓ MASK FALLBACK: {diameter_um}µm (area={mask_area})")
-
             return round(diameter_um, 1), "mask"
-        elif debug:
-            print(f"Mask area is 0")
     except Exception as e:
-        if debug:
-            print(f"DEBUG: Mask error: {e}")
         pass
 
-    # Last resort: bounding box
+    # Fallback to bounding box
     diameter_um = max(box_w, box_h) * calibration
-
-    if debug:
-        print(f"✓ BBOX FALLBACK: {diameter_um}µm")
-
     return round(diameter_um, 1), "bbox"
 
 
@@ -224,10 +152,9 @@ def process_image(image_path, model):
             mask = r.masks.data[i].cpu().numpy() if hasattr(r.masks.data[i], 'cpu') else r.masks.data[i]
             mask_cropped = mask[y1:y2, x1:x2]
 
-            # Use hybrid sizing
+            # Use mask-based sizing
             diameter_um, size_method = calculate_particle_size(
-                image, box, mask_cropped, CALIBRATION_UM_PER_PIXEL,
-                debug=False
+                image, box, mask_cropped, CALIBRATION_UM_PER_PIXEL
             )
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
