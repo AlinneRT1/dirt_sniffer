@@ -2,7 +2,9 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+# Mock libraries that cause system dependency issues
 sys.modules['pi_heif'] = MagicMock()
+sys.modules['cv2'] = MagicMock()
 
 import streamlit as st
 from PIL import Image
