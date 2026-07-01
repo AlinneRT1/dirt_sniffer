@@ -8,4 +8,5 @@ matplotlib
 plotly
 pyjwt
 requests
+scipy
 ultralytics>=8.0.0
