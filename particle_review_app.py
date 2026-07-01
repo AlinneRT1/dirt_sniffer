@@ -23,6 +23,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,13 +65,11 @@ st.markdown(f"""
 
 st.divider()
 
-
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -123,6 +122,9 @@ def process_image(image_path, model):
             box_w = x2 - x1
             box_h = y2 - y1
 
+            # Initialize mask bounds variables
+            x_min = x_max = y_min = y_max = None
+
             # ✅ NEW: Size from mask bounds (not bbox)
             try:
                 mask_data = r.masks.data[i]
@@ -161,6 +163,10 @@ def process_image(image_path, model):
                 "diameter_um": round(max_diam_um, 1),
                 "size_bin": get_size_bin(max_diam_um),
                 "size_method": size_method,  # Track which method was used
+                "mask_x_min": x_min if size_method == "mask_bounds" else None,
+                "mask_y_min": y_min if size_method == "mask_bounds" else None,
+                "mask_x_max": x_max if size_method == "mask_bounds" else None,
+                "mask_y_max": y_max if size_method == "mask_bounds" else None,
                 "deleted": False,
                 "black_bg": is_black
             })
@@ -378,9 +384,25 @@ else:
                     y1 = max(0, y - margin)
                     x2 = min(img_np.shape[1], x + w + margin)
                     y2 = min(img_np.shape[0], y + h + margin)
-                    crop = img_np[y1:y2, x1:x2]
+                    crop = img_np[y1:y2, x1:x2].copy()
 
-                    # Display crop
+                    # Draw mask bounds if available
+                    if p.get("mask_x_min") is not None:
+                        from PIL import ImageDraw
+                        crop_pil = Image.fromarray(crop.astype(np.uint8))
+                        draw = ImageDraw.Draw(crop_pil)
+
+                        # Convert mask bounds to crop coordinates
+                        mx1 = max(0, p["mask_x_min"] - x1)
+                        my1 = max(0, p["mask_y_min"] - y1)
+                        mx2 = min(crop.shape[1], p["mask_x_max"] - x1)
+                        my2 = min(crop.shape[0], p["mask_y_max"] - y1)
+
+                        # Draw green rectangle for mask bounds
+                        draw.rectangle([mx1, my1, mx2, my2], outline=(0, 255, 0), width=2)
+                        crop = np.array(crop_pil)
+
+                    # Display crop with mask bounds
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
 
                     # Info (show sizing method)
