@@ -92,27 +92,78 @@ def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
 
 def calculate_particle_size(image_np, box, mask_region, calibration):
     """
-    Simple sizing: Use mask area (YOLO's segmentation)
-    Falls back to bbox if mask fails
+    Size from mask tight bounds (not bbox, not area)
+    Returns diameter from actual mask boundary
     """
     x1, y1, x2, y2 = [int(v) for v in box.tolist()]
     box_w = x2 - x1
     box_h = y2 - y1
 
-    # Try mask first
     try:
-        mask_area = np.sum(mask_region)
-        if mask_area > 0:
-            # Calculate diameter from mask area
-            diameter_pixels = np.sqrt(4 * mask_area / np.pi)
-            diameter_um = diameter_pixels * calibration
-            return round(diameter_um, 1), "mask"
+        # Find actual mask pixels
+        mask_pixels = np.where(mask_region > 0.5)  # Threshold for mask
+
+        if len(mask_pixels[0]) == 0:
+            raise ValueError("No mask pixels")
+
+        # Get tight bounds of actual mask
+        y_min, y_max = mask_pixels[0].min(), mask_pixels[0].max()
+        x_min, x_max = mask_pixels[1].min(), mask_pixels[1].max()
+
+        # Calculate from tight bounds
+        tight_w = x_max - x_min + 1
+        tight_h = y_max - y_min + 1
+
+        # Use max dimension as diameter (more accurate than bbox)
+        diameter_pixels = max(tight_w, tight_h)
+        diameter_um = diameter_pixels * calibration
+
+        return round(diameter_um, 1), "mask_bounds"
+
     except Exception as e:
         pass
 
-    # Fallback to bounding box
+    # Fallback to bbox only if mask fails
     diameter_um = max(box_w, box_h) * calibration
     return round(diameter_um, 1), "bbox"
+
+
+def draw_mask_outline(image_np, mask_region, color=(0, 255, 0), thickness=2):
+    """
+    Draw mask outline on image using PIL (no cv2 needed)
+    """
+    from PIL import ImageDraw
+
+    try:
+        # Convert to PIL Image
+        if isinstance(image_np, np.ndarray):
+            img_pil = Image.fromarray(image_np.astype(np.uint8))
+        else:
+            img_pil = image_np.copy()
+
+        # Find mask boundary pixels
+        mask_binary = (mask_region > 0.5).astype(np.uint8)
+
+        # Simple boundary detection: pixels where mask is true but have non-mask neighbors
+        boundary = np.zeros_like(mask_binary)
+        for y in range(1, mask_binary.shape[0] - 1):
+            for x in range(1, mask_binary.shape[1] - 1):
+                if mask_binary[y, x]:
+                    # Check if on edge
+                    neighbors = mask_binary[y - 1:y + 2, x - 1:x + 2]
+                    if neighbors.min() == 0:  # Has non-mask neighbor
+                        boundary[y, x] = 1
+
+        # Draw boundary
+        draw = ImageDraw.Draw(img_pil)
+        boundary_pts = np.where(boundary)
+        for y, x in zip(boundary_pts[0], boundary_pts[1]):
+            draw.point((x, y), fill=color)
+
+        return np.array(img_pil)
+
+    except:
+        return image_np
 
 
 def resize_image_for_display(image_array, max_height=1080):
