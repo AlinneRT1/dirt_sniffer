@@ -384,25 +384,24 @@ else:
                     crop = img_np[y1:y2, x1:x2].copy()
 
                     # Draw mask bounds if available
-                    if p.get("mask_x_min") is not None:
-                        from PIL import ImageDraw
-                        crop_pil = Image.fromarray(crop.astype(np.uint8))
-                        draw = ImageDraw.Draw(crop_pil)
+                    try:
+                        if p.get("mask_x_min") is not None and p.get("mask_x_max") is not None:
+                            from PIL import ImageDraw
+                            crop_pil = Image.fromarray(crop.astype(np.uint8))
+                            draw = ImageDraw.Draw(crop_pil)
 
-                        # Convert mask bounds to crop coordinates
-                        mx1 = int(max(0, p["mask_x_min"] - x1))
-                        my1 = int(max(0, p["mask_y_min"] - y1))
-                        mx2 = int(min(crop.shape[1], p["mask_x_max"] - x1))
-                        my2 = int(min(crop.shape[0], p["mask_y_max"] - y1))
+                            # Convert mask bounds to crop coordinates
+                            mx1 = int(max(0, p["mask_x_min"] - x1))
+                            my1 = int(max(0, p["mask_y_min"] - y1))
+                            mx2 = int(min(crop.shape[1], p["mask_x_max"] - x1 + 1))
+                            my2 = int(min(crop.shape[0], p["mask_y_max"] - y1 + 1))
 
-                        # Only draw if bounds are valid
-                        if mx1 < mx2 and my1 < my2:
-                            try:
-                                # Draw green rectangle for mask bounds
+                            # Draw green rectangle for mask bounds
+                            if mx1 < mx2 and my1 < my2:
                                 draw.rectangle([(mx1, my1), (mx2, my2)], outline=(0, 255, 0), width=2)
                                 crop = np.array(crop_pil)
-                            except:
-                                pass  # If drawing fails, just show crop without bounds
+                    except Exception as e:
+                        pass  # Silently fail if drawing doesn't work
 
                     # Display crop with mask bounds
                     st.image(crop, use_column_width=True, caption=f"{p['diameter_um']}µm")
