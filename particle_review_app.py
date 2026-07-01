@@ -52,7 +52,7 @@ CLASS_COLORS = {
     "Other": (0, 0, 255),
 }
 
-st.set_page_config(page_title="Particle Detection Review", page_icon="icon.ico", layout="wide")
+st.set_page_config(page_title="dirt sniffer", page_icon="icon.ico", layout="wide")
 
 with open("icon.png", "rb") as f:
     img = base64.b64encode(f.read()).decode()
