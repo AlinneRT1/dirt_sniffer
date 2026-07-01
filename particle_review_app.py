@@ -21,12 +21,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
 MODEL_PATH = "models/best.pt"
-CALIBRATION_UM_PER_PIXEL = 1.029
+CALIBRATION_UM_PER_PIXEL = 1.299
 BLACK_BG_THRESHOLD = 30
 
 SIZE_BINS = [
@@ -64,13 +65,11 @@ except:
 
 st.divider()
 
-
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -85,14 +84,14 @@ def get_size_bin(diameter_um):
 
 def is_black_background(image_np, x, y, w, h, threshold=BLACK_BG_THRESHOLD):
     region = image_np[max(0, y - 5):min(image_np.shape[0], y + h + 5),
-    max(0, x - 5):min(image_np.shape[1], x + w + 5)]
+                      max(0, x - 5):min(image_np.shape[1], x + w + 5)]
     if region.size == 0:
         return False
     avg_brightness = np.mean(region)
     return avg_brightness < threshold
 
 
-def calculate_particle_size(image_np, box, mask_region, calibration):
+def calculate_particle_size(image_np, box, mask_region, calibration, debug=False):
     """
     Hybrid sizing: try contour detection first, fall back to mask
 
@@ -109,6 +108,8 @@ def calculate_particle_size(image_np, box, mask_region, calibration):
         region = image_np[y1:y2, x1:x2]
 
         if region.size == 0:
+            if debug:
+                print(f"DEBUG: Empty region")
             raise ValueError("Empty region")
 
         # Convert to grayscale for edge detection
@@ -119,6 +120,10 @@ def calculate_particle_size(image_np, box, mask_region, calibration):
 
         # Prepare mask for this region
         mask_bbox = mask_region.astype(np.uint8) * 255
+        mask_area = np.sum(mask_bbox)
+
+        if debug:
+            print(f"DEBUG: Box size={box_w}x{box_h}, mask_area={mask_area}")
 
         # Find edges within the particle
         edges = cv2.Canny(gray, 50, 150)
@@ -127,18 +132,33 @@ def calculate_particle_size(image_np, box, mask_region, calibration):
         # Find contours
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        if debug:
+            print(f"DEBUG: Found {len(contours) if contours else 0} contours")
+
         if contours and len(contours) > 0:
             # Use largest contour
             largest_contour = max(contours, key=cv2.contourArea)
             contour_area = cv2.contourArea(largest_contour)
 
-            if contour_area > 100:  # Must be substantial
+            if debug:
+                print(f"DEBUG: Largest contour area={contour_area}")
+
+            # Lower threshold - use contour if it's substantial
+            if contour_area > 50:  # Relaxed from 100
                 # Calculate diameter from contour area
                 diameter_pixels = np.sqrt(4 * contour_area / np.pi)
                 diameter_um = diameter_pixels * calibration
+
+                if debug:
+                    print(f"✓ CONTOUR SUCCESS: {diameter_um}µm")
+
                 return round(diameter_um, 1), "contour"
+            elif debug:
+                print(f"Contour area too small ({contour_area} < 50)")
 
     except Exception as e:
+        if debug:
+            print(f"DEBUG: Contour error: {e}")
         pass
 
     # Fallback 1: use mask area
@@ -147,12 +167,24 @@ def calculate_particle_size(image_np, box, mask_region, calibration):
         if mask_area > 0:
             diameter_pixels = np.sqrt(4 * mask_area / np.pi)
             diameter_um = diameter_pixels * calibration
+
+            if debug:
+                print(f"✓ MASK FALLBACK: {diameter_um}µm (area={mask_area})")
+
             return round(diameter_um, 1), "mask"
-    except:
+        elif debug:
+            print(f"Mask area is 0")
+    except Exception as e:
+        if debug:
+            print(f"DEBUG: Mask error: {e}")
         pass
 
     # Last resort: bounding box
     diameter_um = max(box_w, box_h) * calibration
+
+    if debug:
+        print(f"✓ BBOX FALLBACK: {diameter_um}µm")
+
     return round(diameter_um, 1), "bbox"
 
 
@@ -191,8 +223,11 @@ def process_image(image_path, model):
             mask = r.masks.data[i].cpu().numpy() if hasattr(r.masks.data[i], 'cpu') else r.masks.data[i]
             mask_cropped = mask[y1:y2, x1:x2]
 
-            # Use hybrid sizing
-            diameter_um, size_method = calculate_particle_size(image, box, mask_cropped, CALIBRATION_UM_PER_PIXEL)
+            # Use hybrid sizing (debug first particle)
+            diameter_um, size_method = calculate_particle_size(
+                image, box, mask_cropped, CALIBRATION_UM_PER_PIXEL,
+                debug=(i == 0)  # Debug first particle only
+            )
 
             is_black = is_black_background(image, x1, y1, box_w, box_h)
 
