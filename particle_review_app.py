@@ -23,7 +23,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,11 +64,13 @@ st.markdown(f"""
 
 st.divider()
 
+
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -387,6 +388,7 @@ else:
                     try:
                         if p.get("mask_x_min") is not None and p.get("mask_x_max") is not None:
                             from PIL import ImageDraw
+
                             crop_pil = Image.fromarray(crop.astype(np.uint8))
                             draw = ImageDraw.Draw(crop_pil)
 
