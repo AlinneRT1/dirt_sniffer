@@ -23,6 +23,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import base64
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,13 +65,11 @@ st.markdown(f"""
 
 st.divider()
 
-
 @st.cache_resource
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     return YOLO(MODEL_PATH)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITIES
@@ -387,10 +386,8 @@ else:
                     # Draw mask bounds if available
                     try:
                         if p.get("mask_x_min") is not None and p.get("mask_x_max") is not None:
-                            from PIL import ImageDraw
-
-                            crop_pil = Image.fromarray(crop.astype(np.uint8))
-                            draw = ImageDraw.Draw(crop_pil)
+                            from PIL import ImageDraw, Image as PILImage
+                            crop_pil = Image.fromarray(crop.astype(np.uint8)).convert('RGB')
 
                             # Convert mask bounds from full image to crop local coords
                             mx1 = int(max(0, p["mask_x_min"] - crop_x1))
@@ -398,10 +395,18 @@ else:
                             mx2 = int(min(crop.shape[1], p["mask_x_max"] - crop_x1 + 1))
                             my2 = int(min(crop.shape[0], p["mask_y_max"] - crop_y1 + 1))
 
-                            # Draw bright green rectangle (thicker line)
-                            if mx1 < mx2 and my1 < my2:
-                                draw.rectangle([(mx1, my1), (mx2, my2)], outline=(0, 255, 0), width=3)
+                            # Draw green outline (try simpler approach)
+                            if mx1 < mx2 and my1 < my2 and mx2 - mx1 > 1 and my2 - my1 > 1:
+                                draw = ImageDraw.Draw(crop_pil)
+                                # Draw thick outline
+                                for offset in range(3):
+                                    draw.rectangle(
+                                        [(mx1+offset, my1+offset), (mx2-offset, my2-offset)],
+                                        outline=(0, 255, 0)
+                                    )
                                 crop = np.array(crop_pil)
+                                if crop.ndim == 3 and crop.shape[2] == 3:
+                                    crop = crop[:, :, :3]  # Ensure RGB
                     except Exception as e:
                         pass
 
